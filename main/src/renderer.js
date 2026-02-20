@@ -10,6 +10,8 @@ window.addEventListener('DOMContentLoaded', () => {
     const homeBtn = document.getElementById('home-btn');
     const settingsBtn = document.getElementById('settings-btn');
     const advancedSettingsBtn = document.getElementById('advanced-settings-btn');
+    const openAdvancedSettingsBtn = document.getElementById('open-advanced-settings-btn');
+    const backToSettingsBtn = document.getElementById('back-to-settings-btn');
     const playerBtn = document.getElementById('player-btn');
     const playlistManagementBtn = document.getElementById('playlist-management-btn');
     const consoleBtn = document.getElementById('console-btn');
@@ -107,10 +109,40 @@ window.addEventListener('DOMContentLoaded', () => {
     const downloadProgressContainer = document.getElementById('download-progress-container');
     const downloadProgressBar = document.getElementById('download-progress-bar');
     const downloadEta = document.getElementById('download-eta');
+    const contextMenu = document.getElementById('context-menu');
+
+    const nowPlaying = document.getElementById('now-playing');
+    const playPauseBtn = document.getElementById('play-pause-btn');
+    const prevBtn = document.getElementById('prev-btn');
+    const nextBtn = document.getElementById('next-btn');
+    const shuffleBtn = document.getElementById('shuffle-btn');
+    const repeatBtn = document.getElementById('repeat-btn');
+    const repeatStatusText = document.getElementById('repeat-status-text');
+    const progressBar = document.getElementById('progress-bar');
+    const progressBarContainer = document.getElementById('progress-bar-container');
+    const currentTime = document.getElementById('current-time');
+    const totalDuration = document.getElementById('total-duration');
+    const volumeSlider = document.getElementById('volume-slider');
+    const volumeIconContainer = document.getElementById('volume-icon-container');
+    const volumeIconUp = document.getElementById('volume-icon-up');
+    const volumeIconMute = document.getElementById('volume-icon-mute');
+
+    const playerPlaylistsContainer = document.getElementById('player-playlists-container');
+    const playerTracksContainer = document.getElementById('player-tracks-container');
+    const playerTracksHeader = document.getElementById('player-tracks-header');
+    const playerPlaylistSearchInput = document.getElementById('player-playlist-search-input');
+    const playerTrackSearchInput = document.getElementById('player-track-search-input');
+
+    const spotifyPreviewModal = document.getElementById('spotify-preview-modal');
+    const previewModalTitle = document.getElementById('preview-modal-title');
+    const previewModalContent = document.getElementById('preview-modal-content');
+    const previewModalCloseBtn = document.getElementById('preview-modal-close-btn');
+    const previewAddAllBtn = document.getElementById('preview-add-all-btn');
+
     const statsDetailModal = document.getElementById('stats-detail-modal');
     const statsDetailTitle = document.getElementById('stats-detail-title');
     const statsDetailContent = document.getElementById('stats-detail-content');
-    const statsDetailCloseBtn = statsDetailModal.querySelector('.modal-close-btn');
+    const statsDetailCloseBtn = statsDetailModal?.querySelector('.modal-close-btn');
 
     // --- STATE & CONTEXT (Centralized) ---
     const state = {
@@ -136,7 +168,7 @@ window.addEventListener('DOMContentLoaded', () => {
     const hideLoader = () => loadingOverlay.classList.add('hidden');
 
     const allViews = [homeView, settingsView, advancedSettingsView, playerView, playlistManagementView, statsView, notificationHistoryView, consoleView, helpView];
-    const allNavBtns = [homeBtn, settingsBtn, advancedSettingsBtn, playerBtn, playlistManagementBtn, statsBtn, notificationHistoryBtn, consoleBtn, helpBtn];
+    const allNavBtns = [homeBtn, settingsBtn, playerBtn, playlistManagementBtn, statsBtn, notificationHistoryBtn, consoleBtn, helpBtn].filter(Boolean);
     async function showView(viewToShow, btnToActivate) {
         // FIX: Restore full showView functionality to handle nav button states and saving settings.
         if (settingsView.classList.contains('active-view') || advancedSettingsView.classList.contains('active-view')) {
@@ -149,9 +181,12 @@ window.addEventListener('DOMContentLoaded', () => {
         btnToActivate.classList.add('active');
     }
 
-    const hideContextMenu = () => contextMenu.classList.add('hidden');
+    const hideContextMenu = () => {
+        if (contextMenu) contextMenu.classList.add('hidden');
+    };
 
     const showContextMenu = (x, y, items) => {
+        if (!contextMenu) return;
         contextMenu.innerHTML = '';
         const menuList = document.createElement('ul');
         menuList.className = 'context-menu-list';
@@ -207,16 +242,145 @@ window.addEventListener('DOMContentLoaded', () => {
 
     // --- Context Object for Modules ---
     const context = {
-        elements: { root, body, closeBtn, homeBtn, settingsBtn, advancedSettingsBtn, playerBtn, playlistManagementBtn, consoleBtn, statsBtn, notificationHistoryBtn, helpBtn, shuffleBtn, repeatBtn, repeatStatusText, refreshPlaylistsBtn, refreshTracksBtn, homeView, settingsView, advancedSettingsView, playerView, playlistManagementView, consoleView, statsView, notificationHistoryView, helpView, downloadBtn, linksInput, consoleOutput, cancelBtn, bigCancelBtn, loadingOverlay, dropZone, createPlaylistBtn, updateNotification, updateMessage, restartBtn, toastNotification, toastIcon, toastTitle, toastMessage, toastCloseBtn, notificationHistoryContainer, clearHistoryBtn, themeGridContainer, favoriteThemeGrid, favoritesContainer, fileExtensionInput, downloadThreadsInput, clientIdInput, clientSecretInput, toggleSecretBtn, downloadsPathInput, changePathBtn, playlistsPathInput, changePlaylistsPathBtn, tracksHeader, playlistContainer, audioPlayer, nowPlaying, playPauseBtn, prevBtn, nextBtn, playIcon, pauseIcon, volumeSlider, volumeIconContainer, volumeIcon, muteIcon, playlistsContainer, favoritePlaylistsContainer, favoritePlaylistsGrid, allPlaylistsGrid, progressBar, progressBarContainer, currentTimeEl, totalDurationEl, totalPlaylistsCount, totalTracksCount, playlistSearchInputPlaylists, currentPlaylistTrackCount, playlistSearchInput, playlistSearchBtn, pmPlaylistsContainer, pmFavoritePlaylistsContainer, pmFavoritePlaylistsGrid, pmAllPlaylistsGrid, pmTracksContainer, pmTracksHeader, pmPlaylistSearchInput, pmTrackSearchInput, createNewPlaylistBtnPm, moveTrackModal, moveTrackNameEl, moveTrackDestinationSelect, moveTrackConfirmBtn, moveTrackCancelBtn, modalCloseBtn, totalSongsStat, playlistsCreatedStat, downloadsInitiatedStat, songsFailedStat, linksProcessedStat, spotifyLinksStat, youtubeLinksStat, successRateStat, notificationsReceivedStat, resetStatsBtn, configCategoryHeader, themesCategoryHeader, animationsCategoryHeader, tabSpeedSlider, tabSpeedValue, dropdownSpeedSlider, dropdownSpeedValue, themeFadeSlider, themeFadeValue, autoCreatePlaylistInput, hideRefreshButtonsInput, hidePlaylistCountsInput, hideTrackNumbersInput, normalizeVolumeInput, hideSearchBarsInput, autoUpdateYtdlpInput, autoUpdateAppInput, updateYtdlpBtn, clearCacheBtn, spotifyLink, spotifySearchInput, spotifyResultsDropdown, spotifyFilterBtn, spotifyFilterDropdown, spotifySearchLimitInput, checkForUpdatesBtn, downloadProgressContainer, downloadProgressBar, downloadEta },
+        elements: {
+            root,
+            body,
+            closeBtn,
+            homeBtn,
+            settingsBtn,
+            advancedSettingsBtn,
+            openAdvancedSettingsBtn,
+            backToSettingsBtn,
+            playerBtn,
+            playlistManagementBtn,
+            consoleBtn,
+            statsBtn,
+            notificationHistoryBtn,
+            helpBtn,
+            homeView,
+            settingsView,
+            advancedSettingsView,
+            playerView,
+            playlistManagementView,
+            consoleView,
+            statsView,
+            notificationHistoryView,
+            helpView,
+            downloadBtn,
+            linksInput,
+            consoleOutput,
+            cancelBtn,
+            bigCancelBtn,
+            loadingOverlay,
+            dropZone,
+            createPlaylistBtn,
+            updateNotification,
+            updateMessage,
+            restartBtn,
+            toastNotification,
+            toastIcon,
+            toastTitle,
+            toastMessage,
+            toastCloseBtn,
+            notificationHistoryContainer,
+            clearHistoryBtn,
+            themeGridContainer,
+            favoriteThemeGrid,
+            favoritesContainer,
+            fileExtensionInput,
+            downloadThreadsInput,
+            clientIdInput,
+            clientSecretInput,
+            toggleSecretBtn,
+            downloadsPathInput,
+            changePathBtn,
+            playlistsPathInput,
+            changePlaylistsPathBtn,
+            pmPlaylistsContainer,
+            pmFavoritePlaylistsContainer,
+            pmFavoritePlaylistsGrid,
+            pmAllPlaylistsGrid,
+            pmTracksContainer,
+            pmTracksHeader,
+            pmPlaylistSearchInput,
+            pmTrackSearchInput,
+            createNewPlaylistBtnPm,
+            moveTrackModal,
+            moveTrackNameEl,
+            moveTrackDestinationSelect,
+            moveTrackConfirmBtn,
+            moveTrackCancelBtn,
+            modalCloseBtn,
+            totalSongsStat,
+            playlistsCreatedStat,
+            downloadsInitiatedStat,
+            songsFailedStat,
+            linksProcessedStat,
+            spotifyLinksStat,
+            youtubeLinksStat,
+            successRateStat,
+            notificationsReceivedStat,
+            resetStatsBtn,
+            configCategoryHeader,
+            themesCategoryHeader,
+            animationsCategoryHeader,
+            tabSpeedSlider,
+            tabSpeedValue,
+            dropdownSpeedSlider,
+            dropdownSpeedValue,
+            themeFadeSlider,
+            themeFadeValue,
+            autoCreatePlaylistInput,
+            hideRefreshButtonsInput,
+            hidePlaylistCountsInput,
+            hideTrackNumbersInput,
+            normalizeVolumeInput,
+            hideSearchBarsInput,
+            updateYtdlpBtn,
+            clearCacheBtn,
+            spotifyLink,
+            spotifySearchInput,
+            spotifyResultsDropdown,
+            spotifyFilterBtn,
+            spotifyFilterDropdown,
+            spotifySearchLimitInput,
+            checkForUpdatesBtn,
+            downloadProgressContainer,
+            downloadProgressBar,
+            downloadEta,
+            shuffleBtn,
+            repeatBtn,
+            repeatStatusText,
+            nowPlaying,
+            playPauseBtn,
+            prevBtn,
+            nextBtn,
+            progressBar,
+            progressBarContainer,
+            currentTime,
+            totalDuration,
+            volumeSlider,
+            volumeIconContainer,
+            volumeIconUp,
+            volumeIconMute,
+            playerPlaylistsContainer,
+            playerTracksContainer,
+            playerTracksHeader,
+            playerPlaylistSearchInput,
+            playerTrackSearchInput,
+        },
         state: state,
         helpers: { showLoader, hideLoader, saveSettings, showView, showContextMenu, hideContextMenu },
+        playerAPI: {},
     };
 
     // --- SEARCH EVENT LISTENERS ---
-    pmPlaylistSearchInput.addEventListener('input', () => {
-        state.playlistSearchQuery = pmPlaylistSearchInput.value.trim().toLowerCase();
-        if (state.isPmInitialized) initializePlaylistManagement(context); // Re-render
-    });
+    if (pmPlaylistSearchInput) {
+        pmPlaylistSearchInput.addEventListener('input', () => {
+            state.playlistSearchQuery = pmPlaylistSearchInput.value.trim().toLowerCase();
+            if (state.isPmInitialized) initializePlaylistManagement(context); // Re-render
+        });
+    }
 
     // --- Spotify Playlist Search ---
     spotifyFilterBtn.addEventListener('click', (e) => {
@@ -302,6 +466,10 @@ window.addEventListener('DOMContentLoaded', () => {
 
                 resultEl.addEventListener('contextmenu', async (e) => {
                     e.preventDefault();
+                    if (!spotifyPreviewModal || !previewModalTitle || !previewModalContent) {
+                        showNotification('info', 'Preview Unavailable', 'Spotify track preview UI is not available in this build.');
+                        return;
+                    }
                     previewModalTitle.textContent = 'Loading...';
                     previewModalContent.innerHTML = '<div class="spinner"></div>';
                     spotifyPreviewModal.classList.remove('hidden');
@@ -344,21 +512,26 @@ window.addEventListener('DOMContentLoaded', () => {
         if (!spotifyFilterBtn.contains(e.target) && !spotifyFilterDropdown.contains(e.target)) {
             spotifyFilterDropdown.classList.add('hidden');
         }
-        if (!contextMenu.contains(e.target)) {
+        if (contextMenu && !contextMenu.contains(e.target)) {
             hideContextMenu();
         }
     });
 
-    previewModalCloseBtn.addEventListener('click', () => spotifyPreviewModal.classList.add('hidden'));
-    previewAddAllBtn.addEventListener('click', () => {
-        if (state.spotifyPreviewTracks.length > 0) {
-            const links = state.spotifyPreviewTracks.map(t => t.url).join('\n');
-            linksInput.value += (linksInput.value ? '\n' : '') + links;
-            linksInput.dispatchEvent(new Event('input', { bubbles: true }));
-            showNotification('success', 'Added to Queue', `${state.spotifyPreviewTracks.length} tracks added to the download input.`);
-        }
-        spotifyPreviewModal.classList.add('hidden');
-    });
+    if (previewModalCloseBtn && spotifyPreviewModal) {
+        previewModalCloseBtn.addEventListener('click', () => spotifyPreviewModal.classList.add('hidden'));
+    }
+
+    if (previewAddAllBtn && spotifyPreviewModal) {
+        previewAddAllBtn.addEventListener('click', () => {
+            if (state.spotifyPreviewTracks.length > 0) {
+                const links = state.spotifyPreviewTracks.map(t => t.url).join('\n');
+                linksInput.value += (linksInput.value ? '\n' : '') + links;
+                linksInput.dispatchEvent(new Event('input', { bubbles: true }));
+                showNotification('success', 'Added to Queue', `${state.spotifyPreviewTracks.length} tracks added to the download input.`);
+            }
+            spotifyPreviewModal.classList.add('hidden');
+        });
+    }
 
     // --- Clear Input Button Logic ---
     function initializeClearButtons() {
@@ -656,7 +829,15 @@ window.addEventListener('DOMContentLoaded', () => {
     // --- Tab Switching Logic ---
     homeBtn.addEventListener('click', () => showView(homeView, homeBtn));
     settingsBtn.addEventListener('click', () => showView(settingsView, settingsBtn));
-    advancedSettingsBtn.addEventListener('click', () => showView(advancedSettingsView, advancedSettingsBtn));
+    if (advancedSettingsBtn) {
+        advancedSettingsBtn.addEventListener('click', () => showView(advancedSettingsView, settingsBtn));
+    }
+    if (openAdvancedSettingsBtn) {
+        openAdvancedSettingsBtn.addEventListener('click', () => showView(advancedSettingsView, settingsBtn));
+    }
+    if (backToSettingsBtn) {
+        backToSettingsBtn.addEventListener('click', () => showView(settingsView, settingsBtn));
+    }
     playerBtn.addEventListener('click', () => {
         showView(playerView, playerBtn);
         initializePlayer(context);

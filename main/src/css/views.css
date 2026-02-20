@@ -12,6 +12,18 @@
     box-sizing: border-box;
 }
 
+.settings-nav-actions {
+    display: flex;
+    justify-content: flex-end;
+    margin: -10px 0 15px;
+}
+
+.settings-nav-actions .secondary-btn {
+    margin: 0;
+    font-size: 13px;
+    padding: 8px 12px;
+}
+
 /* --- Home View --- */
 .input-fields-container {
     display: flex;
@@ -1090,9 +1102,11 @@ body.hide-search-bars .playlist-search-bar {
 
 .player-controls-bar {
     /* This is now a direct grid item in the body, not positioned inside a view */
-    width: 100%;
+    width: calc(100% - 60px);
+    margin-left: 60px;
     box-sizing: border-box;
-    z-index: 20;
+    position: relative;
+    z-index: 10;
     display: grid;
     grid-template-columns: 1fr auto 1fr;
     grid-template-rows: auto auto auto;

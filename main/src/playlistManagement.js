@@ -175,7 +175,7 @@ async function pmRenderPlaylists() {
                                 }
                                 if (ctx.state.pmSelectedPlaylistPath === oldPath) ctx.state.pmSelectedPlaylistPath = result.newPath;
                                 pmRenderPlaylists();
-                                if (ctx.state.isPlayerInitialized) ctx.playerAPI.loadAndRenderPlaylists();
+                                if (ctx.state.isPlayerInitialized) ctx.playerAPI?.loadAndRenderPlaylists?.();
                             } else {
                                 ctx.helpers.showNotification('error', 'Rename Failed', result.error);
                             }
@@ -203,7 +203,7 @@ async function pmRenderPlaylists() {
                             ctx.state.pmSelectedPlaylistPath = null;
                         }
                         pmRenderPlaylists();
-                        if (ctx.state.isPlayerInitialized) ctx.playerAPI.loadAndRenderPlaylists();
+                        if (ctx.state.isPlayerInitialized) ctx.playerAPI?.loadAndRenderPlaylists?.();
                     } else {
                         ctx.helpers.showNotification('error', 'Delete Failed', result.error);
                     }
@@ -233,7 +233,7 @@ export function initializePlaylistManagement(context) {
         if (result.success) {
             ctx.helpers.showNotification('success', 'Playlist Created', `"${result.newPlaylist.name}" has been created.`);
             await pmRenderPlaylists();
-            if (ctx.state.isPlayerInitialized) await ctx.playerAPI.loadAndRenderPlaylists();
+            if (ctx.state.isPlayerInitialized) await ctx.playerAPI?.loadAndRenderPlaylists?.();
         } else {
             ctx.helpers.showNotification('error', 'Creation Failed', result.error);
         }
