@@ -32,6 +32,8 @@ let playerState = {
     playlistSearchQuery: '',
     trackSearchQuery: '',
     selectedPlaylistPath: null,
+    activePlaylistIds: [],
+    allPlaylists: [],
 };
 
 // --- Helper Functions ---
@@ -208,59 +210,103 @@ function resetPlaybackState() {
 
 // --- Playlist & Track Rendering ---
 
-function highlightCurrentTrack() {
-    const { playerTracksContainer } = ctx.elements;
-    playerTracksContainer.querySelectorAll('.player-track-item').forEach((item) => {
-        const trackIndex = Number.parseInt(item.dataset.trackIndex, 10);
-        item.classList.toggle('playing', trackIndex === currentTrackIndex);
-    });
+function syncSharedActiveState() {
+    if (!ctx.state) return;
+    ctx.state.activePlaylistPath = playerState.activePlaylistIds[0] || null;
+    ctx.state.activeQueuePaths = new Set(playerState.activePlaylistIds);
 }
 
-async function renderTracks(playlistPath, options = {}) {
-    const { autoplayFirstTrack = false } = options;
-    const { playerTracksContainer, playerTracksHeader } = ctx.elements;
-    if (!playlistPath) {
-        log('Render tracks called with no playlist selected');
-        playerTracksContainer.innerHTML = `<div class="empty-playlist-message">Select a playlist to see its tracks.</div>`;
-        currentTracklist = [];
-        currentTrackIndex = -1;
-        updateNowPlaying();
+function getPlaylistNameByPath(playlistPath) {
+    return playerState.allPlaylists.find(p => p.path === playlistPath)?.name || 'Select a playlist';
+}
+
+function updateTracksHeader() {
+    const { playerTracksHeader } = ctx.elements;
+    if (!playerTracksHeader) return;
+
+    if (playerState.activePlaylistIds.length === 0) {
+        playerTracksHeader.textContent = 'Select a playlist';
         return;
     }
 
+    if (playerState.activePlaylistIds.length === 1) {
+        playerTracksHeader.textContent = getPlaylistNameByPath(playerState.activePlaylistIds[0]);
+        return;
+    }
+
+    playerTracksHeader.textContent = 'Mix';
+}
+
+function updatePlaylistItemVisuals() {
+    const { playerPlaylistsContainer } = ctx.elements;
+    if (!playerPlaylistsContainer) return;
+
+    const activeSet = new Set(playerState.activePlaylistIds);
+    playerPlaylistsContainer.querySelectorAll('.playlist-list-item').forEach((item) => {
+        const isActive = activeSet.has(item.dataset.path);
+        item.classList.toggle('active', isActive);
+
+        const toggleBtn = item.querySelector('.playlist-add-btn');
+        if (!toggleBtn) return;
+
+        toggleBtn.classList.toggle('mixed-in', isActive);
+        toggleBtn.textContent = isActive ? '−' : '+';
+        toggleBtn.title = isActive ? 'Remove from Mix' : 'Add to Mix';
+        toggleBtn.setAttribute('aria-label', isActive ? 'Remove from Mix' : 'Add to Mix');
+    });
+}
+
+function buildTracklistForPlaylist(tracks) {
+    return tracks
+        .filter(t => /\.(m4a|mp3|wav|flac|ogg|webm)$/i.test(t.path))
+        .map(track => {
+            const parsed = parseQueuePrefix(track.name);
+            return {
+                ...track,
+                queueNumber: parsed.queueNumber,
+                displayName: parsed.displayName,
+            };
+        })
+        .sort((a, b) => {
+            if (a.queueNumber !== null && b.queueNumber !== null) return a.queueNumber - b.queueNumber;
+            if (a.queueNumber !== null) return -1;
+            if (b.queueNumber !== null) return 1;
+            return a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' });
+        });
+}
+
+async function renderActiveTracks(options = {}) {
+    const { autoplayFirstTrack = false, preserveCurrentTrack = true } = options;
+    const { playerTracksContainer } = ctx.elements;
+    const activeIds = [...playerState.activePlaylistIds];
+
+    if (activeIds.length === 0) {
+        log('Render tracks called with no active playlists');
+        playerTracksContainer.innerHTML = `<div class="empty-playlist-message">Select a playlist to see its tracks.</div>`;
+        currentTracklist = [];
+        currentTrackIndex = -1;
+        resetPlaybackState();
+        return;
+    }
+
+    const previousTrackPath = currentTracklist[currentTrackIndex]?.path || null;
+    const wasPlaying = !audio.paused;
+
     try {
-        log('Loading tracks for playlist', { playlistPath, autoplayFirstTrack });
-        const { tracks } = await window.electronAPI.getPlaylistTracks(playlistPath);
-        // FIX: The previous filter was incorrect. This correctly filters for supported audio file extensions.
-        currentTracklist = tracks
-            .filter(t => /\.(m4a|mp3|wav|flac|ogg|webm)$/i.test(t.path))
-            .map(track => {
-                const parsed = parseQueuePrefix(track.name);
-                return {
-                    ...track,
-                    queueNumber: parsed.queueNumber,
-                    displayName: parsed.displayName,
-                };
-            })
-            .sort((a, b) => {
-                if (a.queueNumber !== null && b.queueNumber !== null) return a.queueNumber - b.queueNumber;
-                if (a.queueNumber !== null) return -1;
-                if (b.queueNumber !== null) return 1;
-                return a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' });
-            });
+        log('Loading tracks for active playlists', { activeIds, autoplayFirstTrack, preserveCurrentTrack });
+        const allPlaylistResults = await Promise.all(activeIds.map(playlistPath => window.electronAPI.getPlaylistTracks(playlistPath)));
 
-        currentTracklist = normalizeQueueNumbers(currentTracklist);
-
-        log('Track queue built', {
-            playlistPath,
-            totalTracks: currentTracklist.length,
-            prefixedTracks: currentTracklist.filter(t => t.queueNumber !== null).length,
+        const mergedTracklist = [];
+        allPlaylistResults.forEach(({ tracks }) => {
+            mergedTracklist.push(...buildTracklistForPlaylist(tracks));
         });
 
+        currentTracklist = normalizeQueueNumbers(mergedTracklist);
         playerTracksContainer.innerHTML = '';
 
         if (currentTracklist.length === 0) {
-            playerTracksContainer.innerHTML = `<div class="empty-playlist-message">No supported audio files found in this playlist.</div>`;
+            playerTracksContainer.innerHTML = `<div class="empty-playlist-message">No supported audio files found in the active playlists.</div>`;
+            resetPlaybackState();
             return;
         }
 
@@ -269,7 +315,7 @@ async function renderTracks(playlistPath, options = {}) {
             .filter(({ track }) => track.displayName.toLowerCase().includes(playerState.trackSearchQuery));
 
         log('Filtered tracks for render', {
-            playlistPath,
+            activeIds,
             query: playerState.trackSearchQuery,
             filteredCount: filteredTracks.length,
         });
@@ -284,27 +330,81 @@ async function renderTracks(playlistPath, options = {}) {
             playerTracksContainer.appendChild(item);
         });
 
-        if (autoplayFirstTrack && currentTracklist.length > 0) {
-            playTrack(0);
-        } else {
-            highlightCurrentTrack();
+        if (preserveCurrentTrack && previousTrackPath) {
+            const preservedIndex = currentTracklist.findIndex(track => track.path === previousTrackPath);
+            if (preservedIndex > -1) {
+                currentTrackIndex = preservedIndex;
+                updateNowPlaying();
+                highlightCurrentTrack();
+                if (wasPlaying) {
+                    if (audio.src !== currentTracklist[preservedIndex].path) {
+                        audio.src = currentTracklist[preservedIndex].path;
+                    }
+                    play();
+                }
+                return;
+            }
         }
 
+        if (autoplayFirstTrack && currentTracklist.length > 0) {
+            playTrack(0);
+            return;
+        }
+
+        currentTrackIndex = -1;
+        updateNowPlaying();
+        highlightCurrentTrack();
     } catch (error) {
-        logError('Failed to render tracks', { playlistPath, error: error?.message });
+        logError('Failed to render tracks', { activeIds, error: error?.message });
         playerTracksContainer.innerHTML = `<div class="empty-playlist-message">Error loading tracks.</div>`;
     }
+}
+
+async function setActivePlaylists(nextIds, options = {}) {
+    const normalizedIds = [...new Set(nextIds)];
+    playerState.activePlaylistIds = normalizedIds;
+    playerState.selectedPlaylistPath = normalizedIds[0] || null;
+    syncSharedActiveState();
+    updateTracksHeader();
+    updatePlaylistItemVisuals();
+    await renderActiveTracks(options);
+}
+
+function highlightCurrentTrack() {
+    const { playerTracksContainer } = ctx.elements;
+    playerTracksContainer.querySelectorAll('.player-track-item').forEach((item) => {
+        const trackIndex = Number.parseInt(item.dataset.trackIndex, 10);
+        item.classList.toggle('playing', trackIndex === currentTrackIndex);
+    });
 }
 
 async function renderPlaylists() {
     const { playerPlaylistsContainer } = ctx.elements;
     try {
         log('Loading playlists for player view');
+
+        if (ctx.state.activeQueuePaths instanceof Set) {
+            playerState.activePlaylistIds = [...ctx.state.activeQueuePaths];
+            playerState.selectedPlaylistPath = playerState.activePlaylistIds[0] || null;
+        }
+
         const playlists = await window.electronAPI.getPlaylists();
+        playerState.allPlaylists = playlists || [];
+
+        const availablePlaylistIds = new Set(playerState.allPlaylists.map(p => p.path));
+        const prunedActiveIds = playerState.activePlaylistIds.filter(id => availablePlaylistIds.has(id));
+        const activeIdsChanged = prunedActiveIds.length !== playerState.activePlaylistIds.length;
+        if (activeIdsChanged) {
+            playerState.activePlaylistIds = prunedActiveIds;
+            playerState.selectedPlaylistPath = prunedActiveIds[0] || null;
+            syncSharedActiveState();
+        }
+
         playerPlaylistsContainer.innerHTML = '';
 
         if (!playlists || playlists.length === 0) {
             playerPlaylistsContainer.innerHTML = `<div class="empty-playlist-message">No playlists found. Set the playlist folder in Settings.</div>`;
+            await setActivePlaylists([], { autoplayFirstTrack: false, preserveCurrentTrack: false });
             return;
         }
 
@@ -319,18 +419,50 @@ async function renderPlaylists() {
             const item = document.createElement('div');
             item.className = 'playlist-list-item';
             item.dataset.path = p.path;
-            item.innerHTML = `<span class="playlist-name" title="${p.name}">${p.name}</span>`;
-            item.addEventListener('click', async () => {
-                playerState.selectedPlaylistPath = p.path;
-                document.querySelectorAll('#player-playlists-container .playlist-list-item').forEach(el => el.classList.remove('active'));
-                item.classList.add('active');
-                ctx.elements.playerTracksHeader.textContent = p.name;
-                log('Player playlist selected', { playlistName: p.name, playlistPath: p.path });
-                resetPlaybackState();
-                await renderTracks(p.path, { autoplayFirstTrack: true });
+            item.innerHTML = `<span class="playlist-name" title="${p.name}">${p.name}</span><button class="playlist-add-btn" type="button" title="Add to Mix" aria-label="Add to Mix">+</button>`;
+
+            const addBtn = item.querySelector('.playlist-add-btn');
+            addBtn.addEventListener('click', async (event) => {
+                event.stopPropagation();
+                const isActive = playerState.activePlaylistIds.includes(p.path);
+                const isFirstMixAction = !isActive && playerState.activePlaylistIds.length === 0;
+                const nextActiveIds = isActive
+                    ? playerState.activePlaylistIds.filter(id => id !== p.path)
+                    : [...playerState.activePlaylistIds, p.path];
+
+                log('Player playlist mix toggled', {
+                    playlistName: p.name,
+                    playlistPath: p.path,
+                    action: isActive ? 'remove' : 'add',
+                    activeCount: nextActiveIds.length,
+                });
+
+                if (isFirstMixAction) {
+                    resetPlaybackState();
+                    await setActivePlaylists([p.path], { autoplayFirstTrack: true, preserveCurrentTrack: false });
+                    return;
+                }
+
+                await setActivePlaylists(nextActiveIds, { autoplayFirstTrack: false, preserveCurrentTrack: true });
             });
+
+            item.addEventListener('click', async (event) => {
+                if (event.target.closest('.playlist-add-btn')) return;
+
+                log('Player playlist selected (single mode)', { playlistName: p.name, playlistPath: p.path });
+                resetPlaybackState();
+                await setActivePlaylists([p.path], { autoplayFirstTrack: true, preserveCurrentTrack: false });
+            });
+
             playerPlaylistsContainer.appendChild(item);
         });
+
+        updateTracksHeader();
+        updatePlaylistItemVisuals();
+
+        if (activeIdsChanged) {
+            await renderActiveTracks({ autoplayFirstTrack: false, preserveCurrentTrack: true });
+        }
 
     } catch (error) {
         logError('Failed to render playlists', { error: error?.message });
@@ -348,8 +480,18 @@ export function initializePlayer(context) {
         shuffleBtn, repeatBtn, playerPlaylistSearchInput, playerTrackSearchInput
     } = ctx.elements;
 
+    if (ctx.state.activeQueuePaths instanceof Set) {
+        playerState.activePlaylistIds = [...ctx.state.activeQueuePaths];
+        playerState.selectedPlaylistPath = playerState.activePlaylistIds[0] || null;
+    }
+
+    ctx.playerAPI.loadAndRenderPlaylists = async () => {
+        await renderPlaylists();
+    };
+
     if (ctx.state.isPlayerInitialized) {
         log('Player already initialized; skipping re-init');
+        renderPlaylists();
         return; // Already initialized
     }
 
@@ -395,12 +537,13 @@ export function initializePlayer(context) {
     playerTrackSearchInput.addEventListener('input', (e) => {
         playerState.trackSearchQuery = e.target.value.trim().toLowerCase();
         log('Track search input changed', { query: playerState.trackSearchQuery });
-        renderTracks(playerState.selectedPlaylistPath);
+        renderActiveTracks();
     });
 
     // --- Initial State ---
     renderPlaylists();
-    renderTracks(null);
+    updateTracksHeader();
+    renderActiveTracks();
     setVolume(volumeSlider.value);
     updatePlayPauseButton(false);
     updateNowPlaying();

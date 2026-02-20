@@ -97,6 +97,7 @@ window.addEventListener('DOMContentLoaded', () => {
     const hideTrackNumbersInput = document.getElementById('hideTrackNumbers');
     const normalizeVolumeInput = document.getElementById('normalizeVolume');
     const hideSearchBarsInput = document.getElementById('hideSearchBars');
+    const hideMixButtonsInput = document.getElementById('hideMixButtons');
     const updateYtdlpBtn = document.getElementById('update-ytdlp-btn');
     const checkForUpdatesBtn = document.getElementById('check-for-updates-btn');
     const clearCacheBtn = document.getElementById('clear-cache-btn');
@@ -159,6 +160,8 @@ window.addEventListener('DOMContentLoaded', () => {
         isPmInitialized: false,
         isPlayerInitialized: false,
         pmSelectedPlaylistPath: null,
+        activePlaylistPath: null,
+        activeQueuePaths: new Set(),
         trackToMove: null,
         draggedTrackIndex: null,
         toastTimer: null,
@@ -372,6 +375,7 @@ window.addEventListener('DOMContentLoaded', () => {
             hideTrackNumbers: hideTrackNumbersInput.checked,
             normalizeVolume: normalizeVolumeInput.checked,
             hideSearchBars: hideSearchBarsInput.checked,
+            hideMixButtons: hideMixButtonsInput.checked,
         };
         await window.electronAPI.saveSettings(newSettings);
     };
@@ -472,6 +476,7 @@ window.addEventListener('DOMContentLoaded', () => {
             hideTrackNumbersInput,
             normalizeVolumeInput,
             hideSearchBarsInput,
+            hideMixButtonsInput,
             updateYtdlpBtn,
             clearCacheBtn,
             spotifyLink,
@@ -887,14 +892,16 @@ window.addEventListener('DOMContentLoaded', () => {
             setToggle(hidePlaylistCountsInput, 'hide-playlist-counts', currentConfig.hidePlaylistCounts || false);
             setToggle(hideTrackNumbersInput, 'hide-track-numbers', currentConfig.hideTrackNumbers || false);
             setToggle(hideSearchBarsInput, 'hide-search-bars', currentConfig.hideSearchBars || false);
+            setToggle(hideMixButtonsInput, 'hide-mix-buttons', currentConfig.hideMixButtons || false);
             normalizeVolumeInput.checked = currentConfig.normalizeVolume || false;
             spotifySearchLimitInput.value = currentConfig.spotifySearchLimit || 10;
         }
-        [fileExtensionInput, downloadThreadsInput, clientIdInput, clientSecretInput, tabSpeedSlider, dropdownSpeedSlider, themeFadeSlider, autoCreatePlaylistInput, hideRefreshButtonsInput, hidePlaylistCountsInput, hideTrackNumbersInput, normalizeVolumeInput, hideSearchBarsInput, spotifySearchLimitInput].forEach(input => input.addEventListener('change', saveSettings));
+        [fileExtensionInput, downloadThreadsInput, clientIdInput, clientSecretInput, tabSpeedSlider, dropdownSpeedSlider, themeFadeSlider, autoCreatePlaylistInput, hideRefreshButtonsInput, hidePlaylistCountsInput, hideTrackNumbersInput, normalizeVolumeInput, hideSearchBarsInput, hideMixButtonsInput, spotifySearchLimitInput].forEach(input => input.addEventListener('change', saveSettings));
         hideRefreshButtonsInput.addEventListener('change', () => body.classList.toggle('hide-refresh-buttons', hideRefreshButtonsInput.checked));
         hidePlaylistCountsInput.addEventListener('change', () => body.classList.toggle('hide-playlist-counts', hidePlaylistCountsInput.checked));
         hideTrackNumbersInput.addEventListener('change', () => body.classList.toggle('hide-track-numbers', hideTrackNumbersInput.checked));
         hideSearchBarsInput.addEventListener('change', () => body.classList.toggle('hide-search-bars', hideSearchBarsInput.checked));
+        hideMixButtonsInput.addEventListener('change', () => body.classList.toggle('hide-mix-buttons', hideMixButtonsInput.checked));
         downloadThreadsInput.addEventListener('input', () => {
             const max = parseInt(downloadThreadsInput.max, 10), min = parseInt(downloadThreadsInput.min, 10);
             let value = parseInt(downloadThreadsInput.value, 10);
@@ -1159,6 +1166,7 @@ window.addEventListener('DOMContentLoaded', () => {
         setToggle(hidePlaylistCountsInput, 'hide-playlist-counts', defaultSettings.hidePlaylistCounts || false);
         setToggle(hideTrackNumbersInput, 'hide-track-numbers', defaultSettings.hideTrackNumbers || false);
         setToggle(hideSearchBarsInput, 'hide-search-bars', defaultSettings.hideSearchBars || false);
+        setToggle(hideMixButtonsInput, 'hide-mix-buttons', defaultSettings.hideMixButtons || false);
         const setSlider = (slider, valueEl, prop, value) => {
             slider.value = value;
             valueEl.textContent = `${value}s`;

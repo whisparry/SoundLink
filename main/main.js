@@ -121,6 +121,7 @@ function loadConfig() {
                 favoritePlaylists: [],
                 normalizeVolume: false,
                 hideSearchBars: false,
+                hideMixButtons: false,
                 playlistsFolderPath: ''
             };
             fs.writeFileSync(configPath, JSON.stringify(config, null, 4));
@@ -441,6 +442,7 @@ app.whenReady().then(() => {
             favoritePlaylists: [],
             normalizeVolume: false,
             hideSearchBars: false,
+            hideMixButtons: false,
         };
     });
 
