@@ -2,7 +2,30 @@
 
 let ctx = {}; // To hold context (elements, state, helpers)
 const audio = new Audio();
-const log = (...args) => console.log('[SoundLink][Player]', ...args);
+const emitLog = (level, message, data) => {
+    const payload = { level, scope: 'Player', message, data };
+    try {
+        window.electronAPI?.log?.(payload);
+    } catch (_) {
+        // noop
+    }
+
+    if (level === 'error') {
+        if (data !== undefined) console.error(`[SoundLink][Player] ${message}`, data);
+        else console.error(`[SoundLink][Player] ${message}`);
+    } else if (level === 'warn') {
+        if (data !== undefined) console.warn(`[SoundLink][Player] ${message}`, data);
+        else console.warn(`[SoundLink][Player] ${message}`);
+    } else {
+        if (data !== undefined) console.log(`[SoundLink][Player] ${message}`, data);
+        else console.log(`[SoundLink][Player] ${message}`);
+    }
+};
+
+const logDebug = (message, data) => emitLog('debug', message, data);
+const log = (message, data) => emitLog('info', message, data);
+const logWarn = (message, data) => emitLog('warn', message, data);
+const logError = (message, data) => emitLog('error', message, data);
 let currentTracklist = [];
 let currentTrackIndex = -1;
 let playerState = {
@@ -104,7 +127,7 @@ function playTrack(index) {
 function play() {
     if (audio.src) {
         log('Audio play requested');
-        audio.play().catch(e => console.error("Error playing audio:", e));
+        audio.play().catch(e => logError('Error playing audio', { error: e.message }));
     }
 }
 
@@ -151,12 +174,12 @@ function seek(event) {
     const { progressBarContainer } = ctx.elements;
     const bounds = progressBarContainer.getBoundingClientRect();
     const percentage = (event.clientX - bounds.left) / bounds.width;
-    log('Seek requested', { percentage });
+    logDebug('Seek requested', { percentage });
     audio.currentTime = audio.duration * percentage;
 }
 
 function setVolume(level) {
-    log('Setting volume', { level });
+    logDebug('Setting volume', { level });
     audio.volume = level;
     const { volumeIconUp, volumeIconMute } = ctx.elements;
     audio.muted = level === 0;
@@ -165,7 +188,7 @@ function setVolume(level) {
 }
 
 function toggleMute() {
-    log('Toggle mute requested', { currentlyMuted: audio.muted });
+    logDebug('Toggle mute requested', { currentlyMuted: audio.muted });
     audio.muted = !audio.muted;
     const { volumeSlider, volumeIconUp, volumeIconMute } = ctx.elements;
     volumeSlider.value = audio.muted ? 0 : audio.volume;
@@ -268,8 +291,7 @@ async function renderTracks(playlistPath, options = {}) {
         }
 
     } catch (error) {
-        log('Failed to render tracks', { playlistPath, error: error?.message });
-        console.error("Failed to render player tracks:", error);
+        logError('Failed to render tracks', { playlistPath, error: error?.message });
         playerTracksContainer.innerHTML = `<div class="empty-playlist-message">Error loading tracks.</div>`;
     }
 }
@@ -311,8 +333,7 @@ async function renderPlaylists() {
         });
 
     } catch (error) {
-        log('Failed to render playlists', { error: error?.message });
-        console.error("Failed to render player playlists:", error);
+        logError('Failed to render playlists', { error: error?.message });
         playerPlaylistsContainer.innerHTML = `<div class="empty-playlist-message">Error loading playlists.</div>`;
     }
 }
@@ -336,21 +357,21 @@ export function initializePlayer(context) {
 
     // --- Event Listeners for Audio Element ---
     audio.addEventListener('play', () => {
-        log('Audio play event');
+        logDebug('Audio play event');
         updatePlayPauseButton(true);
     });
     audio.addEventListener('pause', () => {
-        log('Audio pause event');
+        logDebug('Audio pause event');
         updatePlayPauseButton(false);
     });
     audio.addEventListener('timeupdate', updateUI);
     audio.addEventListener('loadedmetadata', updateUI);
     audio.addEventListener('ended', () => {
-        log('Audio ended event');
+        logDebug('Audio ended event');
         playNext();
     });
     audio.addEventListener('volumechange', () => {
-        log('Audio volume changed', { muted: audio.muted, volume: audio.volume });
+        logDebug('Audio volume changed', { muted: audio.muted, volume: audio.volume });
         if (volumeSlider) volumeSlider.value = audio.muted ? 0 : audio.volume;
     });
 

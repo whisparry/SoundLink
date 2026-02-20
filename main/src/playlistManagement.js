@@ -1,10 +1,34 @@
 // This file contains all logic for the playlist management view.
 
 let ctx = {}; // To hold context (elements, state, helpers, playerAPI)
-const log = (...args) => console.log('[SoundLink][PlaylistManagement]', ...args);
+const emitLog = (level, message, data) => {
+    const payload = { level, scope: 'PlaylistManagement', message, data };
+    try {
+        window.electronAPI?.log?.(payload);
+    } catch (_) {
+        // noop
+    }
+
+    if (level === 'error') {
+        if (data !== undefined) console.error(`[SoundLink][PlaylistManagement] ${message}`, data);
+        else console.error(`[SoundLink][PlaylistManagement] ${message}`);
+    } else if (level === 'warn') {
+        if (data !== undefined) console.warn(`[SoundLink][PlaylistManagement] ${message}`, data);
+        else console.warn(`[SoundLink][PlaylistManagement] ${message}`);
+    } else {
+        if (data !== undefined) console.log(`[SoundLink][PlaylistManagement] ${message}`, data);
+        else console.log(`[SoundLink][PlaylistManagement] ${message}`);
+    }
+};
+
+const logDebug = (message, data) => emitLog('debug', message, data);
+const log = (message, data) => emitLog('info', message, data);
+const logWarn = (message, data) => emitLog('warn', message, data);
+const logError = (message, data) => emitLog('error', message, data);
 
 async function pmRenderTracks(playlistPath) {
-    const { pmTracksContainer, pmTrackSearchInput, moveTrackNameEl, moveTrackDestinationSelect, moveTrackModal, playerView, playerBtn } = ctx.elements;
+    const { pmTracksContainer, pmTrackSearchInput, moveTrackNameEl, moveTrackDestinationSelect, moveTrackModal } = ctx.elements;
+    log('Rendering tracks', { playlistPath });
     if (!playlistPath) {
         pmTracksContainer.innerHTML = `<div class="empty-playlist-message">Select a playlist to see its tracks.</div>`;
         return;
@@ -13,11 +37,13 @@ async function pmRenderTracks(playlistPath) {
         const { tracks } = await window.electronAPI.getPlaylistTracks(playlistPath);
         pmTracksContainer.innerHTML = '';
         if (tracks.length === 0) {
+            log('Playlist has no tracks', { playlistPath });
             pmTracksContainer.innerHTML = `<div class="empty-playlist-message">This playlist is empty.</div>`;
             return;
         }
         const searchQuery = pmTrackSearchInput.value.trim().toLowerCase();
         const filteredTracks = tracks.filter(t => t.name.toLowerCase().includes(searchQuery));
+        log('Tracks filtered', { playlistPath, searchQuery, total: tracks.length, filtered: filteredTracks.length });
         filteredTracks.forEach(track => {
             const item = document.createElement('div');
             item.className = 'pm-track-item';
@@ -89,6 +115,7 @@ async function pmRenderTracks(playlistPath) {
                 }
             });
             moveButton.addEventListener('click', () => {
+                log('Move track dialog opened', { trackName: track.name, sourcePlaylistPath: playlistPath });
                 ctx.state.trackToMove = track;
                 moveTrackNameEl.textContent = track.name;
                 moveTrackDestinationSelect.innerHTML = '';
@@ -104,21 +131,24 @@ async function pmRenderTracks(playlistPath) {
             });
         });
     } catch (error) {
-        console.error("Failed to render PM tracks:", error);
+        logError('Failed to render PM tracks', { error: error.message, playlistPath });
     }
 }
 
 async function pmRenderPlaylists() {
-    const { pmAllPlaylistsGrid, pmFavoritePlaylistsGrid, pmFavoritePlaylistsContainer, pmTracksContainer, pmTracksHeader, playerView, playerBtn } = ctx.elements;
+    const { pmAllPlaylistsGrid, pmFavoritePlaylistsGrid, pmFavoritePlaylistsContainer, pmTracksContainer, pmTracksHeader } = ctx.elements;
+    log('Rendering playlists');
     try {
         ctx.state.playlists = await window.electronAPI.getPlaylists();
         pmAllPlaylistsGrid.innerHTML = '';
         pmFavoritePlaylistsGrid.innerHTML = '';
         if (ctx.state.playlists.length === 0) {
+            log('No playlists found in playlist management view');
             pmAllPlaylistsGrid.innerHTML = `<div class="empty-playlist-message">No playlists found.</div>`;
             return;
         }
         const filteredPlaylists = ctx.state.playlists.filter(p => p.name.toLowerCase().includes(ctx.state.playlistSearchQuery));
+        log('Playlists filtered', { total: ctx.state.playlists.length, query: ctx.state.playlistSearchQuery, filtered: filteredPlaylists.length });
         filteredPlaylists.forEach(p => {
             const isFavorite = ctx.state.favoritePlaylists.includes(p.path);
             const targetGrid = isFavorite ? pmFavoritePlaylistsGrid : pmAllPlaylistsGrid;
@@ -129,6 +159,7 @@ async function pmRenderPlaylists() {
             targetGrid.appendChild(item);
             item.addEventListener('click', (e) => {
                 if (e.target.closest('.playlist-delete-btn') || e.target.tagName === 'INPUT') return;
+                log('Playlist selected', { playlistName: p.name, playlistPath: p.path });
                 ctx.state.pmSelectedPlaylistPath = p.path;
                 document.querySelectorAll('#pm-playlists-container .playlist-list-item').forEach(el => el.classList.remove('active'));
                 item.classList.add('active');
@@ -174,6 +205,7 @@ async function pmRenderPlaylists() {
                     if (newName && newName !== originalName) {
                         window.electronAPI.renamePlaylist({ oldPath: p.path, newName: newName }).then(result => {
                             if (result.success) {
+                                log('Playlist renamed successfully', { oldName: originalName, newName });
                                 ctx.helpers.showNotification('success', 'Renamed', `Playlist renamed to "${newName}".`);
                                 const oldPath = p.path;
                                 const favoriteIndex = ctx.state.favoritePlaylists.indexOf(oldPath);
@@ -231,13 +263,14 @@ async function pmRenderPlaylists() {
         });
         pmFavoritePlaylistsContainer.classList.toggle('hidden', pmFavoritePlaylistsGrid.children.length === 0);
     } catch (error) {
-        console.error("Failed to render PM playlists:", error);
+        logError('Failed to render PM playlists', { error: error.message });
     }
 }
 
 export function initializePlaylistManagement(context) {
     ctx = context;
     const { createNewPlaylistBtnPm, pmTrackSearchInput, modalCloseBtn, moveTrackCancelBtn, moveTrackConfirmBtn, moveTrackDestinationSelect, moveTrackModal } = ctx.elements;
+    log('Initialize playlist management called', { alreadyInitialized: ctx.state.isPmInitialized });
 
     if (ctx.state.isPmInitialized) {
         pmRenderPlaylists();
@@ -248,6 +281,7 @@ export function initializePlaylistManagement(context) {
     ctx.state.isPmInitialized = true;
 
     createNewPlaylistBtnPm.addEventListener('click', async () => {
+        log('Create new playlist requested');
         const result = await window.electronAPI.createNewPlaylist();
         if (result.success) {
             ctx.helpers.showNotification('success', 'Playlist Created', `"${result.newPlaylist.name}" has been created.`);
@@ -257,12 +291,25 @@ export function initializePlaylistManagement(context) {
             ctx.helpers.showNotification('error', 'Creation Failed', result.error);
         }
     });
-    pmTrackSearchInput.addEventListener('input', () => pmRenderTracks(ctx.state.pmSelectedPlaylistPath));
-    modalCloseBtn.addEventListener('click', () => moveTrackModal.classList.add('hidden'));
-    moveTrackCancelBtn.addEventListener('click', () => moveTrackModal.classList.add('hidden'));
+    pmTrackSearchInput.addEventListener('input', () => {
+        log('Track search changed', { query: pmTrackSearchInput.value.trim().toLowerCase() });
+        pmRenderTracks(ctx.state.pmSelectedPlaylistPath);
+    });
+    modalCloseBtn.addEventListener('click', () => {
+        log('Move track dialog closed (x button)');
+        moveTrackModal.classList.add('hidden');
+    });
+    moveTrackCancelBtn.addEventListener('click', () => {
+        log('Move track dialog canceled');
+        moveTrackModal.classList.add('hidden');
+    });
     moveTrackConfirmBtn.addEventListener('click', async () => {
         const destinationPlaylistPath = moveTrackDestinationSelect.value;
         if (ctx.state.trackToMove && destinationPlaylistPath) {
+            log('Move track confirmed', {
+                trackName: ctx.state.trackToMove.name,
+                destinationPlaylistPath,
+            });
             const result = await window.electronAPI.moveTrack({ sourcePath: ctx.state.trackToMove.path, destinationPlaylistPath });
             if (result.success) {
                 ctx.helpers.showNotification('success', 'Track Moved', `Moved "${ctx.state.trackToMove.name}" successfully.`);

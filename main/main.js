@@ -8,6 +8,37 @@ const mm = require('music-metadata');
 const axios = require('axios');
 const log = require('electron-log');
 
+const LOG_LEVELS = {
+    debug: 10,
+    info: 20,
+    warn: 30,
+    error: 40,
+};
+
+const currentLogLevel = process.env.SOUNDLINK_LOG_LEVEL?.toLowerCase() || 'debug';
+
+function shouldLog(level) {
+    const requested = LOG_LEVELS[level] ?? LOG_LEVELS.info;
+    const active = LOG_LEVELS[currentLogLevel] ?? LOG_LEVELS.debug;
+    return requested >= active;
+}
+
+function writeLog(level, scope, message, data) {
+    const safeLevel = LOG_LEVELS[level] ? level : 'info';
+    if (!shouldLog(safeLevel)) return;
+
+    const timestamp = new Date().toISOString();
+    const scopeText = scope ? `[${scope}]` : '';
+    const prefix = `${timestamp} [${safeLevel.toUpperCase()}] ${scopeText}`.trim();
+
+    if (data !== undefined) {
+        console[safeLevel === 'debug' ? 'log' : safeLevel](`${prefix} ${message}`, data);
+        return;
+    }
+
+    console[safeLevel === 'debug' ? 'log' : safeLevel](`${prefix} ${message}`);
+}
+
 // --- CONSTANTS & CONFIG ---
 const supportedExtensions = ['.m4a', '.mp3', '.wav', '.flac', '.ogg', '.webm'];
 app.disableHardwareAcceleration();
@@ -181,6 +212,7 @@ function getNextYtdlpPath() {
 autoUpdater.logger = log;
 autoUpdater.logger.transports.file.level = 'info';
 log.info('App starting...');
+writeLog('info', 'Main', 'App bootstrap started', { isDev, currentLogLevel });
 
 loadConfig();
 loadStats();
@@ -229,6 +261,19 @@ function createWindow() {
 
     mainWindow.loadFile(path.join(__dirname, 'src', 'index.html'));
 
+    mainWindow.webContents.on('console-message', (_event, level, message, line, sourceId) => {
+        const levelMap = {
+            0: 'debug',
+            1: 'info',
+            2: 'warn',
+            3: 'error',
+        };
+        writeLog(levelMap[level] || 'info', 'RendererConsole', message, {
+            line,
+            sourceId,
+        });
+    });
+
     mainWindow.once('ready-to-show', () => {
         mainWindow.show();
         if (!isDev) {
@@ -247,6 +292,12 @@ function createWindow() {
 
 // --- APP LIFECYCLE & IPC HANDLERS ---
 app.whenReady().then(() => {
+    ipcMain.on('renderer-log', (event, payload = {}) => {
+        const { level = 'info', scope = 'Renderer', message = '', data } = payload;
+        writeLog(level, `Renderer:${scope}`, message, data);
+    });
+
+    writeLog('info', 'Main', 'App ready event received');
     createWindow();
 
     // Start periodic update checks
@@ -278,10 +329,11 @@ app.whenReady().then(() => {
         tray.setToolTip('SoundLink');
         tray.setContextMenu(contextMenu);
         tray.on('click', () => {
+            writeLog('debug', 'Tray', 'Tray icon clicked');
             mainWindow.show();
         });
     } catch (error) {
-        console.error('Failed to create system tray icon.', error);
+        writeLog('error', 'Tray', 'Failed to create system tray icon', { error: error.message });
     }
 
     // --- ALL IPC HANDLERS ARE DEFINED HERE ---

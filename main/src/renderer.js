@@ -170,10 +170,43 @@ window.addEventListener('DOMContentLoaded', () => {
     };
 
     // --- Helper Functions ---
-    const log = (...args) => console.log('[SoundLink]', ...args);
+    const emitLog = (level, scope, message, data) => {
+        const payload = { level, scope, message, data };
+        try {
+            window.electronAPI?.log?.(payload);
+        } catch (_) {
+            // noop
+        }
+
+        if (level === 'error') {
+            if (data !== undefined) console.error(`[SoundLink][${scope}] ${message}`, data);
+            else console.error(`[SoundLink][${scope}] ${message}`);
+        } else if (level === 'warn') {
+            if (data !== undefined) console.warn(`[SoundLink][${scope}] ${message}`, data);
+            else console.warn(`[SoundLink][${scope}] ${message}`);
+        } else {
+            if (data !== undefined) console.log(`[SoundLink][${scope}] ${message}`, data);
+            else console.log(`[SoundLink][${scope}] ${message}`);
+        }
+    };
+
+    const log = (message, data) => emitLog('info', 'Renderer', message, data);
+    const logDebug = (message, data) => emitLog('debug', 'Renderer', message, data);
+    const logWarn = (message, data) => emitLog('warn', 'Renderer', message, data);
+    const logTab = (tab, action, data = undefined) => {
+        if (data !== undefined) emitLog('info', `Tab:${tab}`, action, data);
+        else emitLog('info', `Tab:${tab}`, action);
+    };
+    const logError = (scope, error, data = undefined) => {
+        const message = typeof error === 'string' ? error : (error?.message || 'Unknown error');
+        if (data !== undefined) emitLog('error', scope, message, data);
+        else emitLog('error', scope, message);
+    };
 
     const showLoader = () => loadingOverlay.classList.remove('hidden');
     const hideLoader = () => loadingOverlay.classList.add('hidden');
+
+    logDebug('Renderer DOM content loaded');
 
     const allViews = [homeView, settingsView, advancedSettingsView, playerView, playlistManagementView, statsView, notificationHistoryView, consoleView, helpView];
     const allNavBtns = [homeBtn, settingsBtn, playerBtn, playlistManagementBtn, statsBtn, notificationHistoryBtn, consoleBtn, helpBtn].filter(Boolean);
@@ -188,6 +221,19 @@ window.addEventListener('DOMContentLoaded', () => {
         viewToShow.classList.add('active-view');
         allNavBtns.forEach(btn => btn.classList.remove('active'));
         btnToActivate.classList.add('active');
+        const viewToTabMap = {
+            'home-view': 'Home',
+            'settings-view': 'Settings',
+            'advanced-settings-view': 'AdvancedSettings',
+            'player-view': 'Player',
+            'playlist-management-view': 'PlaylistManagement',
+            'console-view': 'Console',
+            'stats-view': 'Stats',
+            'notification-history-view': 'NotificationHistory',
+            'help-view': 'Help',
+        };
+        const tabName = viewToTabMap[viewToShow?.id] || viewToShow?.id || 'Unknown';
+        logTab(tabName, 'loaded');
     }
 
     const hideContextMenu = () => {
@@ -470,6 +516,7 @@ window.addEventListener('DOMContentLoaded', () => {
     if (pmPlaylistSearchInput) {
         pmPlaylistSearchInput.addEventListener('input', () => {
             state.playlistSearchQuery = pmPlaylistSearchInput.value.trim().toLowerCase();
+            logTab('PlaylistManagement', 'playlist search changed', { query: state.playlistSearchQuery });
             if (state.isPmInitialized) initializePlaylistManagement(context); // Re-render
         });
     }
@@ -477,6 +524,7 @@ window.addEventListener('DOMContentLoaded', () => {
     // --- Spotify Playlist Search ---
     spotifyFilterBtn.addEventListener('click', (e) => {
         e.stopPropagation();
+        logTab('Home', 'spotify filter toggled');
         spotifyFilterDropdown.classList.toggle('hidden');
     });
 
@@ -486,6 +534,7 @@ window.addEventListener('DOMContentLoaded', () => {
             e.target.classList.add('active');
             state.spotifySearchType = e.target.dataset.type;
             const typeName = e.target.textContent;
+            logTab('Home', 'spotify search type changed', { type: state.spotifySearchType });
             spotifySearchInput.placeholder = `Search Spotify ${typeName}...`;
             spotifyFilterDropdown.classList.add('hidden');
             if (spotifySearchInput.value.trim().length >= 3) {
@@ -497,6 +546,7 @@ window.addEventListener('DOMContentLoaded', () => {
     spotifySearchInput.addEventListener('input', () => {
         clearTimeout(state.spotifySearchDebounce);
         const query = spotifySearchInput.value.trim();
+        logTab('Home', 'spotify search input', { queryLength: query.length });
 
         if (query.length < 3) {
             spotifyResultsDropdown.classList.add('hidden');
@@ -505,6 +555,7 @@ window.addEventListener('DOMContentLoaded', () => {
 
         state.spotifySearchDebounce = setTimeout(async () => {
             const limit = parseInt(spotifySearchLimitInput.value, 10) || 10;
+            logTab('Home', 'spotify search request', { query, limit, type: state.spotifySearchType });
             const results = await window.electronAPI.searchSpotifyPlaylists({ query, type: state.spotifySearchType, limit });
             spotifyResultsDropdown.innerHTML = '';
 
@@ -550,6 +601,7 @@ window.addEventListener('DOMContentLoaded', () => {
                     <p class="spotify-result-owner">${ownerText}</p>`;
                 
                 resultEl.addEventListener('click', () => {
+                    logTab('Home', 'spotify result selected', { itemType: item.type, itemName: item.name });
                     linksInput.value += (linksInput.value ? '\n' : '') + item.url;
                     spotifySearchInput.value = '';
                     spotifyResultsDropdown.classList.add('hidden');
@@ -558,6 +610,7 @@ window.addEventListener('DOMContentLoaded', () => {
 
                 resultEl.addEventListener('contextmenu', async (e) => {
                     e.preventDefault();
+                    logTab('Home', 'spotify result context preview opened', { itemType: item.type, itemName: item.name });
                     if (!spotifyPreviewModal || !previewModalTitle || !previewModalContent) {
                         showNotification('info', 'Preview Unavailable', 'Spotify track preview UI is not available in this build.');
                         return;
@@ -634,6 +687,7 @@ window.addEventListener('DOMContentLoaded', () => {
                 const toggleClearButton = () => clearBtn.classList.toggle('hidden', input.value.length === 0);
                 input.addEventListener('input', toggleClearButton);
                 clearBtn.addEventListener('click', () => {
+                    log('Input clear button clicked', { inputId: input.id || 'unknown' });
                     input.value = '';
                     input.focus();
                     input.dispatchEvent(new Event('input', { bubbles: true }));
@@ -648,7 +702,7 @@ window.addEventListener('DOMContentLoaded', () => {
         try {
             localStorage.setItem('notificationHistory', JSON.stringify(state.notificationHistory));
         } catch (e) {
-            console.error("Failed to save notification history:", e);
+            logError('NotificationHistory', 'Failed to save notification history', e);
         }
     }
 
@@ -657,7 +711,7 @@ window.addEventListener('DOMContentLoaded', () => {
             const storedHistory = localStorage.getItem('notificationHistory');
             if (storedHistory) state.notificationHistory = JSON.parse(storedHistory);
         } catch (e) {
-            console.error("Failed to load notification history:", e);
+            logError('NotificationHistory', 'Failed to load notification history', e);
             state.notificationHistory = [];
         }
     }
@@ -686,6 +740,7 @@ window.addEventListener('DOMContentLoaded', () => {
     }
 
     clearHistoryBtn.addEventListener('click', async () => {
+        logTab('NotificationHistory', 'clear history requested');
         const confirmed = await showConfirmDialog(
             'Clear Notification History',
             'Are you sure you want to clear all notification history?',
@@ -729,16 +784,20 @@ window.addEventListener('DOMContentLoaded', () => {
 
     // --- Settings Logic ---
     changePathBtn.addEventListener('click', async () => {
+        logTab('Settings', 'change downloads path requested');
         const newPath = await window.electronAPI.openFolderDialog();
         if (newPath) {
+            logTab('Settings', 'downloads path changed', { newPath });
             downloadsPathInput.value = newPath;
             saveSettings();
         }
     });
 
     changePlaylistsPathBtn.addEventListener('click', async () => {
+        logTab('Settings', 'change playlists path requested');
         const newPath = await window.electronAPI.openFolderDialog();
         if (newPath) {
+            logTab('Settings', 'playlists path changed', { newPath });
             playlistsPathInput.value = newPath;
             saveSettings();
         }
@@ -746,6 +805,7 @@ window.addEventListener('DOMContentLoaded', () => {
 
     toggleSecretBtn.addEventListener('click', () => {
         const isPassword = clientSecretInput.type === 'password';
+        logTab('Settings', 'spotify client secret visibility toggled', { visible: isPassword });
         clientSecretInput.type = isPassword ? 'text' : 'password';
         toggleSecretBtn.textContent = isPassword ? 'Hide' : 'Show';
     });
@@ -753,6 +813,7 @@ window.addEventListener('DOMContentLoaded', () => {
     function applyTheme(themeName) {
         const theme = themeColors[themeName];
         if (!theme) return;
+        logTab('Settings', 'theme applied', { themeName });
         for (const [key, value] of Object.entries(theme)) root.style.setProperty(key, value);
         state.currentThemeName = themeName;
         document.querySelectorAll('.theme-button').forEach(btn => btn.classList.toggle('active', btn.dataset.theme === themeName));
@@ -922,6 +983,7 @@ window.addEventListener('DOMContentLoaded', () => {
         e.stopPropagation();
         dropZone.classList.remove('active');
         const text = e.dataTransfer.getData('text/plain');
+        logTab('Home', 'links dropped', { hasText: Boolean(text), textLength: text?.length || 0 });
         if (text) linksInput.value += (linksInput.value ? '\n' : '') + text;
     });
 
@@ -938,14 +1000,33 @@ window.addEventListener('DOMContentLoaded', () => {
         backToSettingsBtn.addEventListener('click', () => showView(settingsView, settingsBtn));
     }
     playerBtn.addEventListener('click', () => {
+        logTab('Player', 'open requested');
         showView(playerView, playerBtn);
         initializePlayer(context);
     });
-    playlistManagementBtn.addEventListener('click', () => { showView(playlistManagementView, playlistManagementBtn); initializePlaylistManagement(context); });
-    consoleBtn.addEventListener('click', () => showView(consoleView, consoleBtn));
-    statsBtn.addEventListener('click', () => { showView(statsView, statsBtn); initializeStats(); });
-    notificationHistoryBtn.addEventListener('click', () => { showView(notificationHistoryView, notificationHistoryBtn); renderNotificationHistory(); });
-    helpBtn.addEventListener('click', () => showView(helpView, helpBtn));
+    playlistManagementBtn.addEventListener('click', () => {
+        logTab('PlaylistManagement', 'open requested');
+        showView(playlistManagementView, playlistManagementBtn);
+        initializePlaylistManagement(context);
+    });
+    consoleBtn.addEventListener('click', () => {
+        logTab('Console', 'open requested');
+        showView(consoleView, consoleBtn);
+    });
+    statsBtn.addEventListener('click', () => {
+        logTab('Stats', 'open requested');
+        showView(statsView, statsBtn);
+        initializeStats();
+    });
+    notificationHistoryBtn.addEventListener('click', () => {
+        logTab('NotificationHistory', 'open requested');
+        showView(notificationHistoryView, notificationHistoryBtn);
+        renderNotificationHistory();
+    });
+    helpBtn.addEventListener('click', () => {
+        logTab('Help', 'open requested');
+        showView(helpView, helpBtn);
+    });
 
     // --- Advanced Settings Actions ---
     updateYtdlpBtn.addEventListener('click', async () => {
@@ -960,6 +1041,7 @@ window.addEventListener('DOMContentLoaded', () => {
         window.electronAPI.checkForUpdates();
     });
     clearCacheBtn.addEventListener('click', async () => {
+        logTab('AdvancedSettings', 'clear cache requested');
         const result = await window.electronAPI.clearLinkCache();
         if (result.success) showNotification('success', 'Cache Cleared', result.message);
         else showNotification('error', 'Cache Error', result.error);
@@ -968,6 +1050,7 @@ window.addEventListener('DOMContentLoaded', () => {
     // --- Category Collapse Logic ---
     [configCategoryHeader, themesCategoryHeader, animationsCategoryHeader].forEach(header => {
         header.addEventListener('click', () => {
+            logTab('Settings', 'category toggled', { categoryId: header.id });
             const content = header.nextElementSibling;
             content.classList.toggle('collapsed');
             header.classList.toggle('collapsed');
@@ -988,6 +1071,7 @@ window.addEventListener('DOMContentLoaded', () => {
 
     // --- Console Output Logic ---
     function appendConsoleMessage(message) {
+        logTab('Console', 'message appended', { length: message?.length || 0 });
         const div = document.createElement('div');
         div.className = 'console-message';
         div.textContent = message;
@@ -996,6 +1080,7 @@ window.addEventListener('DOMContentLoaded', () => {
     }
 
     window.electronAPI.onUpdateStatus((message, isFinished, payload) => {
+        logTab('Console', 'download update status event', { isFinished, hasPayload: Boolean(payload) });
         appendConsoleMessage(message);
         if (isFinished) {
             downloadBtn.classList.remove('hidden');
@@ -1043,6 +1128,7 @@ window.addEventListener('DOMContentLoaded', () => {
         window.electronAPI.cancelDownload();
     });
     createPlaylistBtn.addEventListener('click', async () => {
+        logTab('Console', 'create playlist from download requested');
         const result = await window.electronAPI.createPlaylist();
         appendConsoleMessage(result);
         createPlaylistBtn.classList.add('hidden');
@@ -1053,6 +1139,7 @@ window.addEventListener('DOMContentLoaded', () => {
 
     // --- Settings Reset Logic ---
     document.getElementById('reset-settings-btn').addEventListener('click', async () => {
+        logTab('AdvancedSettings', 'reset settings requested');
         const defaultSettings = await window.electronAPI.getDefaultSettings();
         applyTheme(defaultSettings.theme || 'dark');
         state.favoriteThemes = defaultSettings.favoriteThemes || [];
@@ -1087,6 +1174,7 @@ window.addEventListener('DOMContentLoaded', () => {
 
     // --- Stats Logic ---
     async function initializeStats() {
+        logTab('Stats', 'stats initialization requested');
         const statsData = await window.electronAPI.getStats();
         if (statsData) {
             totalSongsStat.textContent = statsData.totalSongsDownloaded || 0;
@@ -1102,6 +1190,7 @@ window.addEventListener('DOMContentLoaded', () => {
         }
     }
     resetStatsBtn.addEventListener('click', async () => {
+        logTab('Stats', 'reset stats requested');
         const confirmed = await showConfirmDialog(
             'Reset Statistics',
             'Are you sure you want to reset all statistics? This cannot be undone.',
@@ -1117,6 +1206,7 @@ window.addEventListener('DOMContentLoaded', () => {
     // --- Help View Logic ---
     spotifyLink.addEventListener('click', (e) => {
         e.preventDefault();
+        logTab('Help', 'open external spotify developer link');
         window.electronAPI.openExternalLink(e.target.href);
     });
 

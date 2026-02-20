@@ -42,6 +42,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
     onDownloadProgress: (callback) => ipcRenderer.on('download-progress', (event, ...args) => callback(...args)),
     getDetailedStats: (statType) => ipcRenderer.invoke('get-detailed-stats', statType),
     incrementNotificationStat: () => ipcRenderer.send('increment-notification-stat'),
-    onDownloadProgress: (callback) => ipcRenderer.on('download-progress', (event, ...args) => callback(...args))
+    log: (payload) => ipcRenderer.send('renderer-log', payload)
   }
   );
