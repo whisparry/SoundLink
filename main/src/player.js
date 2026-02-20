@@ -463,26 +463,12 @@ async function renderActiveTracks(options = {}) {
 
             item.addEventListener('contextmenu', (event) => {
                 event.preventDefault();
-                const sourcePlaylistPath = track.playlistPath || getParentDirectory(track.path);
-                const sourcePlaylistName = getPlaylistNameByPath(sourcePlaylistPath);
-                const isSourceInMix = Boolean(sourcePlaylistPath && playerState.activePlaylistIds.includes(sourcePlaylistPath));
                 const menuItems = [
                     {
                         label: 'Play',
                         action: () => playTrack(index),
                     },
                 ];
-
-                if (sourcePlaylistPath) {
-                    menuItems.push({
-                        label: isSourceInMix ? 'Remove from Mix' : 'Add to Mix',
-                        action: async () => {
-                            await togglePlaylistMix(sourcePlaylistPath);
-                            const actionLabel = isSourceInMix ? 'removed from' : 'added to';
-                            ctx.helpers.showNotification('info', 'Mix Updated', `"${sourcePlaylistName}" ${actionLabel} mix.`);
-                        },
-                    });
-                }
 
                 menuItems.push(
                     { type: 'separator' },
