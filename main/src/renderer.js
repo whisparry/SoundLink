@@ -138,6 +138,12 @@ window.addEventListener('DOMContentLoaded', () => {
     const previewModalContent = document.getElementById('preview-modal-content');
     const previewModalCloseBtn = document.getElementById('preview-modal-close-btn');
     const previewAddAllBtn = document.getElementById('preview-add-all-btn');
+    const appDialogModal = document.getElementById('app-dialog-modal');
+    const appDialogTitle = document.getElementById('app-dialog-title');
+    const appDialogMessage = document.getElementById('app-dialog-message');
+    const appDialogInput = document.getElementById('app-dialog-input');
+    const appDialogConfirmBtn = document.getElementById('app-dialog-confirm-btn');
+    const appDialogCancelBtn = document.getElementById('app-dialog-cancel-btn');
 
     const statsDetailModal = document.getElementById('stats-detail-modal');
     const statsDetailTitle = document.getElementById('stats-detail-title');
@@ -221,6 +227,87 @@ window.addEventListener('DOMContentLoaded', () => {
         contextMenu.style.left = `${x + menuWidth > innerWidth ? innerWidth - menuWidth - 5 : x}px`;
         contextMenu.style.top = `${y + menuHeight > innerHeight ? innerHeight - menuHeight - 5 : y}px`;
     };
+
+    const showCustomDialog = ({
+        title,
+        message,
+        confirmText = 'Confirm',
+        cancelText = 'Cancel',
+        danger = false,
+        prompt = false,
+        initialValue = '',
+        placeholder = '',
+    }) => {
+        return new Promise(resolve => {
+            if (!appDialogModal || !appDialogTitle || !appDialogMessage || !appDialogConfirmBtn || !appDialogCancelBtn || !appDialogInput) {
+                resolve(prompt ? null : false);
+                return;
+            }
+
+            log('Opening custom dialog', { title, prompt, danger });
+            appDialogTitle.textContent = title;
+            appDialogMessage.textContent = message;
+            appDialogConfirmBtn.textContent = confirmText;
+            appDialogCancelBtn.textContent = cancelText;
+            appDialogConfirmBtn.classList.toggle('danger', danger);
+
+            if (prompt) {
+                appDialogInput.classList.remove('hidden');
+                appDialogInput.value = initialValue;
+                appDialogInput.placeholder = placeholder;
+            } else {
+                appDialogInput.classList.add('hidden');
+                appDialogInput.value = '';
+                appDialogInput.placeholder = '';
+            }
+
+            appDialogModal.classList.remove('hidden');
+
+            const cleanup = () => {
+                appDialogModal.classList.add('hidden');
+                appDialogConfirmBtn.classList.remove('danger');
+                appDialogConfirmBtn.removeEventListener('click', onConfirm);
+                appDialogCancelBtn.removeEventListener('click', onCancel);
+                appDialogModal.removeEventListener('click', onOverlayClick);
+                appDialogInput.removeEventListener('keydown', onInputKeydown);
+            };
+
+            const onConfirm = () => {
+                const value = prompt ? appDialogInput.value : true;
+                cleanup();
+                resolve(value);
+            };
+
+            const onCancel = () => {
+                cleanup();
+                resolve(prompt ? null : false);
+            };
+
+            const onOverlayClick = (event) => {
+                if (event.target === appDialogModal) onCancel();
+            };
+
+            const onInputKeydown = (event) => {
+                if (event.key === 'Enter') onConfirm();
+                if (event.key === 'Escape') onCancel();
+            };
+
+            appDialogConfirmBtn.addEventListener('click', onConfirm);
+            appDialogCancelBtn.addEventListener('click', onCancel);
+            appDialogModal.addEventListener('click', onOverlayClick);
+            appDialogInput.addEventListener('keydown', onInputKeydown);
+
+            if (prompt) {
+                setTimeout(() => {
+                    appDialogInput.focus();
+                    appDialogInput.select();
+                }, 0);
+            }
+        });
+    };
+
+    const showConfirmDialog = (title, message, options = {}) => showCustomDialog({ title, message, ...options, prompt: false });
+    const showPromptDialog = (title, message, initialValue = '', options = {}) => showCustomDialog({ title, message, initialValue, ...options, prompt: true });
 
     const saveSettings = async () => {
         const newSettings = {
@@ -376,6 +463,8 @@ window.addEventListener('DOMContentLoaded', () => {
         helpers: { showLoader, hideLoader, saveSettings, showView, showContextMenu, hideContextMenu },
         playerAPI: {},
     };
+    context.helpers.showConfirmDialog = showConfirmDialog;
+    context.helpers.showPromptDialog = showPromptDialog;
 
     // --- SEARCH EVENT LISTENERS ---
     if (pmPlaylistSearchInput) {
@@ -596,8 +685,13 @@ window.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    clearHistoryBtn.addEventListener('click', () => {
-        if (confirm('Are you sure you want to clear all notification history?')) {
+    clearHistoryBtn.addEventListener('click', async () => {
+        const confirmed = await showConfirmDialog(
+            'Clear Notification History',
+            'Are you sure you want to clear all notification history?',
+            { confirmText: 'Clear', cancelText: 'Cancel', danger: true }
+        );
+        if (confirmed) {
             state.notificationHistory = [];
             saveNotificationHistory();
             renderNotificationHistory();
@@ -1008,7 +1102,12 @@ window.addEventListener('DOMContentLoaded', () => {
         }
     }
     resetStatsBtn.addEventListener('click', async () => {
-        if (confirm('Are you sure you want to reset all statistics? This cannot be undone.')) {
+        const confirmed = await showConfirmDialog(
+            'Reset Statistics',
+            'Are you sure you want to reset all statistics? This cannot be undone.',
+            { confirmText: 'Reset', cancelText: 'Cancel', danger: true }
+        );
+        if (confirmed) {
             await window.electronAPI.resetStats();
             initializeStats();
             showNotification('info', 'Stats Reset', 'Your statistics have been cleared.');

@@ -291,6 +291,28 @@ button:hover {
     background-color: var(--border-color);
 }
 
+.app-dialog-content {
+    max-width: 460px;
+}
+
+#app-dialog-message {
+    margin: 8px 0 14px;
+}
+
+#app-dialog-input {
+    width: 100%;
+    margin-bottom: 16px;
+    box-sizing: border-box;
+}
+
+#app-dialog-confirm-btn.danger {
+    background-color: var(--danger-primary);
+}
+
+#app-dialog-confirm-btn.danger:hover {
+    background-color: var(--danger-hover);
+}
+
 /* Context Menu Styles */
 .context-menu {
     position: absolute;

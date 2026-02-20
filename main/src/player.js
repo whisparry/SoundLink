@@ -2,6 +2,7 @@
 
 let ctx = {}; // To hold context (elements, state, helpers)
 const audio = new Audio();
+const log = (...args) => console.log('[SoundLink][Player]', ...args);
 let currentTracklist = [];
 let currentTrackIndex = -1;
 let playerState = {
@@ -15,6 +16,15 @@ function formatTime(seconds) {
     const minutes = Math.floor(seconds / 60);
     const secs = Math.floor(seconds % 60);
     return `${minutes}:${secs < 10 ? '0' : ''}${secs}`;
+}
+
+function parseQueuePrefix(name) {
+    const match = name.match(/^\s*(\d{3})\s*-\s*(.+)$/);
+    if (!match) return { queueNumber: null, displayName: name };
+    return {
+        queueNumber: Number.parseInt(match[1], 10),
+        displayName: match[2].trim() || name,
+    };
 }
 
 // --- UI Update Functions ---
@@ -37,7 +47,7 @@ function updateUI() {
 function updateNowPlaying() {
     const { nowPlaying } = ctx.elements;
     if (currentTrackIndex > -1 && currentTracklist[currentTrackIndex]) {
-        nowPlaying.textContent = currentTracklist[currentTrackIndex].name;
+        nowPlaying.textContent = currentTracklist[currentTrackIndex].displayName;
     } else {
         nowPlaying.textContent = 'Select a song to play';
     }
@@ -124,8 +134,9 @@ function toggleMute() {
 
 function highlightCurrentTrack() {
     const { playerTracksContainer } = ctx.elements;
-    playerTracksContainer.querySelectorAll('.player-track-item').forEach((item, index) => {
-        item.classList.toggle('playing', index === currentTrackIndex);
+    playerTracksContainer.querySelectorAll('.player-track-item').forEach((item) => {
+        const trackIndex = Number.parseInt(item.dataset.trackIndex, 10);
+        item.classList.toggle('playing', trackIndex === currentTrackIndex);
     });
 }
 
@@ -140,7 +151,29 @@ async function renderTracks(playlistPath) {
     try {
         const { tracks } = await window.electronAPI.getPlaylistTracks(playlistPath);
         // FIX: The previous filter was incorrect. This correctly filters for supported audio file extensions.
-        currentTracklist = tracks.filter(t => /\.(m4a|mp3|wav|flac|ogg|webm)$/i.test(t.path));
+        currentTracklist = tracks
+            .filter(t => /\.(m4a|mp3|wav|flac|ogg|webm)$/i.test(t.path))
+            .map(track => {
+                const parsed = parseQueuePrefix(track.name);
+                return {
+                    ...track,
+                    queueNumber: parsed.queueNumber,
+                    displayName: parsed.displayName,
+                };
+            })
+            .sort((a, b) => {
+                if (a.queueNumber !== null && b.queueNumber !== null) return a.queueNumber - b.queueNumber;
+                if (a.queueNumber !== null) return -1;
+                if (b.queueNumber !== null) return 1;
+                return a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' });
+            });
+
+        log('Track queue built', {
+            playlistPath,
+            totalTracks: currentTracklist.length,
+            prefixedTracks: currentTracklist.filter(t => t.queueNumber !== null).length,
+        });
+
         playerTracksContainer.innerHTML = '';
 
         if (currentTracklist.length === 0) {
@@ -148,12 +181,16 @@ async function renderTracks(playlistPath) {
             return;
         }
 
-        const filteredTracks = currentTracklist.filter(t => t.name.toLowerCase().includes(playerState.trackSearchQuery));
+        const filteredTracks = currentTracklist
+            .map((track, index) => ({ track, index }))
+            .filter(({ track }) => track.displayName.toLowerCase().includes(playerState.trackSearchQuery));
 
-        filteredTracks.forEach((track, index) => {
+        filteredTracks.forEach(({ track, index }) => {
             const item = document.createElement('div');
             item.className = 'player-track-item';
-            item.innerHTML = `<span class="track-number">${String(index + 1).padStart(2, '0')}</span><span class="player-track-name" title="${track.name}">${track.name}</span>`;
+            item.dataset.trackIndex = String(index);
+            const renderedQueueNumber = track.queueNumber ?? (index + 1);
+            item.innerHTML = `<span class="track-number">${String(renderedQueueNumber).padStart(2, '0')}</span><span class="player-track-name" title="${track.displayName}">${track.displayName}</span>`;
             item.addEventListener('click', () => playTrack(index));
             playerTracksContainer.appendChild(item);
         });

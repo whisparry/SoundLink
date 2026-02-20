@@ -1,6 +1,7 @@
 // This file contains all logic for the playlist management view.
 
 let ctx = {}; // To hold context (elements, state, helpers, playerAPI)
+const log = (...args) => console.log('[SoundLink][PlaylistManagement]', ...args);
 
 async function pmRenderTracks(playlistPath) {
     const { pmTracksContainer, pmTrackSearchInput, moveTrackNameEl, moveTrackDestinationSelect, moveTrackModal, playerView, playerBtn } = ctx.elements;
@@ -51,9 +52,15 @@ async function pmRenderTracks(playlistPath) {
                 ctx.helpers.showContextMenu(e.clientX, e.clientY, menuItems);
             });
 
-            trackNameSpan.addEventListener('dblclick', () => {
-                const newName = prompt('Enter new track name (without extension):', track.name);
+            trackNameSpan.addEventListener('dblclick', async () => {
+                const newName = await ctx.helpers.showPromptDialog(
+                    'Rename Track',
+                    'Enter new track name (without extension):',
+                    track.name,
+                    { confirmText: 'Rename', cancelText: 'Cancel' }
+                );
                 if (newName && newName.trim() !== track.name) {
+                    log('Renaming track', { oldName: track.name, newName: newName.trim() });
                     window.electronAPI.renameTrack({ oldPath: track.path, newName: newName.trim() }).then(result => {
                         if (result.success) {
                             ctx.helpers.showNotification('success', 'Renamed', `Track renamed successfully.`);
@@ -65,7 +72,13 @@ async function pmRenderTracks(playlistPath) {
                 }
             });
             deleteButton.addEventListener('click', async () => {
-                if (confirm(`Are you sure you want to permanently delete "${track.name}"?`)) {
+                const confirmed = await ctx.helpers.showConfirmDialog(
+                    'Delete Track',
+                    `Are you sure you want to permanently delete "${track.name}"?`,
+                    { confirmText: 'Delete', cancelText: 'Cancel', danger: true }
+                );
+                if (confirmed) {
+                    log('Deleting track', { trackName: track.name });
                     const result = await window.electronAPI.deleteTrack(track.path);
                     if (result.success) {
                         ctx.helpers.showNotification('success', 'Track Deleted', `"${track.name}" has been deleted.`);
@@ -193,7 +206,13 @@ async function pmRenderPlaylists() {
                 });
             });
             item.querySelector('.playlist-delete-btn').addEventListener('click', async () => {
-                if (confirm(`Are you sure you want to permanently delete the playlist "${p.name}"?`)) {
+                const confirmed = await ctx.helpers.showConfirmDialog(
+                    'Delete Playlist',
+                    `Are you sure you want to permanently delete the playlist "${p.name}"?`,
+                    { confirmText: 'Delete', cancelText: 'Cancel', danger: true }
+                );
+                if (confirmed) {
+                    log('Deleting playlist', { playlistName: p.name });
                     const result = await window.electronAPI.deletePlaylist(p.path);
                     if (result.success) {
                         ctx.helpers.showNotification('success', 'Playlist Deleted', `"${p.name}" has been deleted.`);

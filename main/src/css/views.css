@@ -1114,18 +1114,15 @@ body.hide-search-bars .playlist-search-bar {
     position: static;
     z-index: 10;
     margin-top: auto;
-    display: grid;
-    grid-template-columns: 1fr auto 1fr;
-    grid-template-rows: auto auto auto;
-    grid-template-areas:
-        "now-playing now-playing now-playing"
-        "progress    progress    progress"
-        "left        center      right";
-    align-items: center;
-    row-gap: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
     padding: 15px 25px;
     background-color: var(--bg-secondary);
     border-top: 1px solid var(--border-color);
+    border-radius: 12px;
+    overflow: hidden;
+    min-width: 0;
 }
 
 .player-buttons-wrapper {
@@ -1137,21 +1134,31 @@ body.hide-search-bars .playlist-search-bar {
 }
 
 #now-playing {
-    grid-area: now-playing;
     font-style: italic;
     color: var(--text-secondary);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
     text-align: center;
+    width: 100%;
+    min-width: 0;
 }
 
 .progress-container {
-    grid-area: progress;
     display: flex;
     align-items: center;
     gap: 15px;
     width: 100%;
+    min-width: 0;
+}
+
+.player-controls-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    width: 100%;
+    min-width: 0;
 }
 
 #progress-bar-container {
@@ -1177,11 +1184,11 @@ body.hide-search-bars .playlist-search-bar {
 }
 
 .left-controls {
-    grid-area: left;
-    justify-self: start;
     display: flex;
     align-items: center;
     gap: 5px;
+    flex: 1 1 0;
+    min-width: 0;
 }
 
 #repeat-status-text {
@@ -1193,11 +1200,10 @@ body.hide-search-bars .playlist-search-bar {
 }
 
 .main-controls {
-    grid-area: center;
-    justify-self: center;
     display: flex;
     gap: 40px;
     justify-content: center;
+    flex: 0 0 auto;
 }
 
 .main-controls button {
@@ -1214,17 +1220,19 @@ body.hide-search-bars .playlist-search-bar {
 }
 
 .volume-container {
-    grid-area: right;
-    justify-self: end;
     display: flex;
     align-items: center;
     color: var(--text-secondary);
+    flex: 1 1 0;
+    justify-content: flex-end;
+    min-width: 0;
 }
 
 #volume-slider {
     -webkit-appearance: none;
     appearance: none;
-    width: 280px;
+    width: clamp(120px, 20vw, 280px);
+    max-width: 100%;
     height: 8px;
     background: var(--bg-tertiary);
     border-radius: 5px;
