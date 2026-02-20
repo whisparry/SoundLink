@@ -27,6 +27,35 @@ function parseQueuePrefix(name) {
     };
 }
 
+function normalizeQueueNumbers(tracklist) {
+    const prefixed = tracklist.filter(track => track.queueNumber !== null);
+    const rawNumbers = prefixed.map(track => track.queueNumber);
+    const startsAt = rawNumbers.length > 0 ? rawNumbers[0] : null;
+    let hasGap = false;
+
+    for (let index = 1; index < rawNumbers.length; index += 1) {
+        if (rawNumbers[index] - rawNumbers[index - 1] !== 1) {
+            hasGap = true;
+            break;
+        }
+    }
+
+    const normalized = tracklist.map((track, index) => ({
+        ...track,
+        normalizedQueueNumber: index + 1,
+    }));
+
+    log('Queue numbering normalized', {
+        totalTracks: tracklist.length,
+        prefixedTracks: prefixed.length,
+        startsAt,
+        hasGap,
+        rawNumbers,
+    });
+
+    return normalized;
+}
+
 // --- UI Update Functions ---
 function updatePlayPauseButton(isPlaying) {
     const { playPauseBtn } = ctx.elements;
@@ -58,6 +87,13 @@ function playTrack(index) {
     if (index >= 0 && index < currentTracklist.length) {
         currentTrackIndex = index;
         const track = currentTracklist[index];
+        log('Playing track', {
+            index,
+            normalizedQueueNumber: track.normalizedQueueNumber,
+            rawQueueNumber: track.queueNumber,
+            name: track.displayName,
+            path: track.path,
+        });
         audio.src = track.path;
         play();
         updateNowPlaying();
@@ -67,11 +103,13 @@ function playTrack(index) {
 
 function play() {
     if (audio.src) {
+        log('Audio play requested');
         audio.play().catch(e => console.error("Error playing audio:", e));
     }
 }
 
 function pause() {
+    log('Audio pause requested');
     audio.pause();
 }
 
@@ -86,6 +124,7 @@ function togglePlayPause() {
 }
 
 function playNext() {
+    log('Play next requested', { currentTrackIndex, trackCount: currentTracklist.length });
     let nextIndex = currentTrackIndex + 1;
     if (nextIndex >= currentTracklist.length) {
         nextIndex = 0; // Loop to the beginning
@@ -94,6 +133,7 @@ function playNext() {
 }
 
 function playPrev() {
+    log('Play previous requested', { currentTrackIndex, currentTime: audio.currentTime });
     // If song is more than 3 seconds in, restart it. Otherwise, go to previous.
     if (audio.currentTime > 3) {
         audio.currentTime = 0;
@@ -111,10 +151,12 @@ function seek(event) {
     const { progressBarContainer } = ctx.elements;
     const bounds = progressBarContainer.getBoundingClientRect();
     const percentage = (event.clientX - bounds.left) / bounds.width;
+    log('Seek requested', { percentage });
     audio.currentTime = audio.duration * percentage;
 }
 
 function setVolume(level) {
+    log('Setting volume', { level });
     audio.volume = level;
     const { volumeIconUp, volumeIconMute } = ctx.elements;
     audio.muted = level === 0;
@@ -123,11 +165,22 @@ function setVolume(level) {
 }
 
 function toggleMute() {
+    log('Toggle mute requested', { currentlyMuted: audio.muted });
     audio.muted = !audio.muted;
     const { volumeSlider, volumeIconUp, volumeIconMute } = ctx.elements;
     volumeSlider.value = audio.muted ? 0 : audio.volume;
     volumeIconUp.classList.toggle('hidden', audio.muted);
     volumeIconMute.classList.toggle('hidden', !audio.muted);
+}
+
+function resetPlaybackState() {
+    log('Resetting playback state');
+    audio.pause();
+    audio.currentTime = 0;
+    audio.src = '';
+    currentTrackIndex = -1;
+    updatePlayPauseButton(false);
+    updateNowPlaying();
 }
 
 // --- Playlist & Track Rendering ---
@@ -140,15 +193,20 @@ function highlightCurrentTrack() {
     });
 }
 
-async function renderTracks(playlistPath) {
+async function renderTracks(playlistPath, options = {}) {
+    const { autoplayFirstTrack = false } = options;
     const { playerTracksContainer, playerTracksHeader } = ctx.elements;
     if (!playlistPath) {
+        log('Render tracks called with no playlist selected');
         playerTracksContainer.innerHTML = `<div class="empty-playlist-message">Select a playlist to see its tracks.</div>`;
         currentTracklist = [];
+        currentTrackIndex = -1;
+        updateNowPlaying();
         return;
     }
 
     try {
+        log('Loading tracks for playlist', { playlistPath, autoplayFirstTrack });
         const { tracks } = await window.electronAPI.getPlaylistTracks(playlistPath);
         // FIX: The previous filter was incorrect. This correctly filters for supported audio file extensions.
         currentTracklist = tracks
@@ -168,6 +226,8 @@ async function renderTracks(playlistPath) {
                 return a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' });
             });
 
+        currentTracklist = normalizeQueueNumbers(currentTracklist);
+
         log('Track queue built', {
             playlistPath,
             totalTracks: currentTracklist.length,
@@ -185,18 +245,30 @@ async function renderTracks(playlistPath) {
             .map((track, index) => ({ track, index }))
             .filter(({ track }) => track.displayName.toLowerCase().includes(playerState.trackSearchQuery));
 
+        log('Filtered tracks for render', {
+            playlistPath,
+            query: playerState.trackSearchQuery,
+            filteredCount: filteredTracks.length,
+        });
+
         filteredTracks.forEach(({ track, index }) => {
             const item = document.createElement('div');
             item.className = 'player-track-item';
             item.dataset.trackIndex = String(index);
-            const renderedQueueNumber = track.queueNumber ?? (index + 1);
+            const renderedQueueNumber = track.normalizedQueueNumber;
             item.innerHTML = `<span class="track-number">${String(renderedQueueNumber).padStart(2, '0')}</span><span class="player-track-name" title="${track.displayName}">${track.displayName}</span>`;
             item.addEventListener('click', () => playTrack(index));
             playerTracksContainer.appendChild(item);
         });
-        highlightCurrentTrack();
+
+        if (autoplayFirstTrack && currentTracklist.length > 0) {
+            playTrack(0);
+        } else {
+            highlightCurrentTrack();
+        }
 
     } catch (error) {
+        log('Failed to render tracks', { playlistPath, error: error?.message });
         console.error("Failed to render player tracks:", error);
         playerTracksContainer.innerHTML = `<div class="empty-playlist-message">Error loading tracks.</div>`;
     }
@@ -205,6 +277,7 @@ async function renderTracks(playlistPath) {
 async function renderPlaylists() {
     const { playerPlaylistsContainer } = ctx.elements;
     try {
+        log('Loading playlists for player view');
         const playlists = await window.electronAPI.getPlaylists();
         playerPlaylistsContainer.innerHTML = '';
 
@@ -214,23 +287,31 @@ async function renderPlaylists() {
         }
 
         const filteredPlaylists = playlists.filter(p => p.name.toLowerCase().includes(playerState.playlistSearchQuery));
+        log('Filtered playlists for player view', {
+            totalPlaylists: playlists.length,
+            query: playerState.playlistSearchQuery,
+            filteredCount: filteredPlaylists.length,
+        });
 
         filteredPlaylists.forEach(p => {
             const item = document.createElement('div');
             item.className = 'playlist-list-item';
             item.dataset.path = p.path;
             item.innerHTML = `<span class="playlist-name" title="${p.name}">${p.name}</span>`;
-            item.addEventListener('click', () => {
+            item.addEventListener('click', async () => {
                 playerState.selectedPlaylistPath = p.path;
                 document.querySelectorAll('#player-playlists-container .playlist-list-item').forEach(el => el.classList.remove('active'));
                 item.classList.add('active');
                 ctx.elements.playerTracksHeader.textContent = p.name;
-                renderTracks(p.path);
+                log('Player playlist selected', { playlistName: p.name, playlistPath: p.path });
+                resetPlaybackState();
+                await renderTracks(p.path, { autoplayFirstTrack: true });
             });
             playerPlaylistsContainer.appendChild(item);
         });
 
     } catch (error) {
+        log('Failed to render playlists', { error: error?.message });
         console.error("Failed to render player playlists:", error);
         playerPlaylistsContainer.innerHTML = `<div class="empty-playlist-message">Error loading playlists.</div>`;
     }
@@ -247,16 +328,29 @@ export function initializePlayer(context) {
     } = ctx.elements;
 
     if (ctx.state.isPlayerInitialized) {
+        log('Player already initialized; skipping re-init');
         return; // Already initialized
     }
 
+    log('Initializing player module');
+
     // --- Event Listeners for Audio Element ---
-    audio.addEventListener('play', () => updatePlayPauseButton(true));
-    audio.addEventListener('pause', () => updatePlayPauseButton(false));
+    audio.addEventListener('play', () => {
+        log('Audio play event');
+        updatePlayPauseButton(true);
+    });
+    audio.addEventListener('pause', () => {
+        log('Audio pause event');
+        updatePlayPauseButton(false);
+    });
     audio.addEventListener('timeupdate', updateUI);
     audio.addEventListener('loadedmetadata', updateUI);
-    audio.addEventListener('ended', playNext);
+    audio.addEventListener('ended', () => {
+        log('Audio ended event');
+        playNext();
+    });
     audio.addEventListener('volumechange', () => {
+        log('Audio volume changed', { muted: audio.muted, volume: audio.volume });
         if (volumeSlider) volumeSlider.value = audio.muted ? 0 : audio.volume;
     });
 
@@ -273,11 +367,13 @@ export function initializePlayer(context) {
 
     playerPlaylistSearchInput.addEventListener('input', (e) => {
         playerState.playlistSearchQuery = e.target.value.trim().toLowerCase();
+        log('Playlist search input changed', { query: playerState.playlistSearchQuery });
         renderPlaylists();
     });
 
     playerTrackSearchInput.addEventListener('input', (e) => {
         playerState.trackSearchQuery = e.target.value.trim().toLowerCase();
+        log('Track search input changed', { query: playerState.trackSearchQuery });
         renderTracks(playerState.selectedPlaylistPath);
     });
 
@@ -289,4 +385,5 @@ export function initializePlayer(context) {
     updateNowPlaying();
 
     ctx.state.isPlayerInitialized = true;
+    log('Player initialized successfully');
 }
