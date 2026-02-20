@@ -50,6 +50,7 @@ const trayIconPath = path.join(assetsPath, 'icon.png');
 const configPath = path.join(app.getPath('userData'), 'config.json');
 const statsPath = path.join(app.getPath('userData'), 'stats.json');
 const cachePath = path.join(app.getPath('userData'), 'link_cache.json');
+const undoTrashPath = path.join(app.getPath('userData'), 'undo-trash');
 const ytdlpDir = isDev ? path.join(__dirname, 'yt-dlp') : path.join(process.resourcesPath, 'yt-dlp');
 
 // --- STATE VARIABLES ---
@@ -549,8 +550,14 @@ app.whenReady().then(() => {
             if (!filePath || !fs.existsSync(filePath)) {
                 return { success: false, error: 'File does not exist.' };
             }
-            await fs.promises.unlink(filePath);
-            return { success: true };
+            const moved = await moveToUndoTrash(filePath);
+            return {
+                success: true,
+                undoAction: {
+                    type: 'delete-track',
+                    payload: moved,
+                },
+            };
         } catch (error) {
             console.error(`Failed to delete track: ${filePath}`, error);
             return { success: false, error: error.message };
@@ -636,10 +643,77 @@ app.whenReady().then(() => {
             if (!playlistPath || !fs.existsSync(playlistPath)) {
                 return { success: false, error: 'Playlist folder does not exist.' };
             }
-            await fs.promises.rm(playlistPath, { recursive: true, force: true });
-            return { success: true };
+            const moved = await moveToUndoTrash(playlistPath);
+            return {
+                success: true,
+                undoAction: {
+                    type: 'delete-playlist',
+                    payload: moved,
+                },
+            };
         } catch (error) {
             console.error(`Failed to delete playlist: ${playlistPath}`, error);
+            return { success: false, error: error.message };
+        }
+    });
+
+    ipcMain.handle('undo-action', async (event, action) => {
+        try {
+            if (!action || !action.type) {
+                return { success: false, error: 'Invalid undo action payload.' };
+            }
+
+            const payload = action.payload || {};
+
+            if (action.type === 'delete-track' || action.type === 'delete-playlist') {
+                return await restoreFromUndoTrash(payload.trashPath, payload.originalPath);
+            }
+
+            if (action.type === 'rename-playlist') {
+                const currentPath = payload.currentPath;
+                const previousName = sanitizeFilename(payload.previousName || '');
+
+                if (!currentPath || !fs.existsSync(currentPath)) {
+                    return { success: false, error: 'Current playlist path no longer exists.' };
+                }
+                if (!previousName) {
+                    return { success: false, error: 'Invalid previous playlist name for undo.' };
+                }
+
+                const targetPath = path.join(path.dirname(currentPath), previousName);
+                if (fs.existsSync(targetPath)) {
+                    return { success: false, error: 'Cannot undo rename because the original name already exists.' };
+                }
+
+                await fs.promises.rename(currentPath, targetPath);
+                return { success: true, restoredPath: targetPath };
+            }
+
+            if (action.type === 'rename-track') {
+                const currentPath = payload.currentPath;
+                const previousNameRaw = payload.previousName || '';
+                const previousName = sanitizeFilename(path.parse(previousNameRaw).name || previousNameRaw);
+
+                if (!currentPath || !fs.existsSync(currentPath)) {
+                    return { success: false, error: 'Current track path no longer exists.' };
+                }
+                if (!previousName) {
+                    return { success: false, error: 'Invalid previous track name for undo.' };
+                }
+
+                const extension = path.extname(currentPath);
+                const targetPath = path.join(path.dirname(currentPath), `${previousName}${extension}`);
+                if (fs.existsSync(targetPath)) {
+                    return { success: false, error: 'Cannot undo rename because the original track name already exists.' };
+                }
+
+                await fs.promises.rename(currentPath, targetPath);
+                return { success: true, restoredPath: targetPath };
+            }
+
+            return { success: false, error: `Unsupported undo action type: ${action.type}` };
+        } catch (error) {
+            console.error('Failed to undo action', { action, error });
             return { success: false, error: error.message };
         }
     });
@@ -1224,4 +1298,65 @@ app.on('window-all-closed', () => {
     }
     app.quit();
 });
+}
+
+async function ensureUndoTrashExists() {
+    await fs.promises.mkdir(undoTrashPath, { recursive: true });
+}
+
+function buildUndoTrashItemPath(targetPath) {
+    const itemName = path.basename(targetPath);
+    const uniqueId = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+    return path.join(undoTrashPath, `${uniqueId}-${itemName}`);
+}
+
+async function moveToUndoTrash(targetPath) {
+    await ensureUndoTrashExists();
+    const trashPath = buildUndoTrashItemPath(targetPath);
+    try {
+        await fs.promises.rename(targetPath, trashPath);
+    } catch (error) {
+        if (error.code !== 'EXDEV') throw error;
+
+        const sourceStat = await fs.promises.stat(targetPath);
+        if (sourceStat.isDirectory()) {
+            await fs.promises.cp(targetPath, trashPath, { recursive: true });
+            await fs.promises.rm(targetPath, { recursive: true, force: true });
+        } else {
+            await fs.promises.copyFile(targetPath, trashPath);
+            await fs.promises.unlink(targetPath);
+        }
+    }
+    return { trashPath, originalPath: targetPath, itemName: path.basename(targetPath) };
+}
+
+async function restoreFromUndoTrash(trashPath, originalPath) {
+    if (!trashPath || !originalPath) {
+        return { success: false, error: 'Undo payload is missing required paths.' };
+    }
+
+    if (!fs.existsSync(trashPath)) {
+        return { success: false, error: 'Undo item no longer exists in temporary storage.' };
+    }
+
+    if (fs.existsSync(originalPath)) {
+        return { success: false, error: 'Cannot restore because destination path already exists.' };
+    }
+
+    await fs.promises.mkdir(path.dirname(originalPath), { recursive: true });
+    try {
+        await fs.promises.rename(trashPath, originalPath);
+    } catch (error) {
+        if (error.code !== 'EXDEV') throw error;
+
+        const sourceStat = await fs.promises.stat(trashPath);
+        if (sourceStat.isDirectory()) {
+            await fs.promises.cp(trashPath, originalPath, { recursive: true });
+            await fs.promises.rm(trashPath, { recursive: true, force: true });
+        } else {
+            await fs.promises.copyFile(trashPath, originalPath);
+            await fs.promises.unlink(trashPath);
+        }
+    }
+    return { success: true, restoredPath: originalPath };
 }

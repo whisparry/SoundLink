@@ -89,7 +89,20 @@ async function pmRenderTracks(playlistPath) {
                     log('Renaming track', { oldName: track.name, newName: newName.trim() });
                     window.electronAPI.renameTrack({ oldPath: track.path, newName: newName.trim() }).then(result => {
                         if (result.success) {
-                            ctx.helpers.showNotification('success', 'Renamed', `Track renamed successfully.`);
+                            ctx.helpers.showNotification(
+                                'success',
+                                'Renamed',
+                                `Track renamed successfully.`,
+                                {
+                                    undoAction: {
+                                        type: 'rename-track',
+                                        payload: {
+                                            currentPath: result.newPath,
+                                            previousName: track.name,
+                                        },
+                                    },
+                                }
+                            );
                             pmRenderTracks(playlistPath);
                         } else {
                             ctx.helpers.showNotification('error', 'Rename Failed', result.error);
@@ -108,7 +121,12 @@ async function pmRenderTracks(playlistPath) {
                     await ctx.playerAPI?.unloadTrackByPath?.(track.path);
                     const result = await window.electronAPI.deleteTrack(track.path);
                     if (result.success) {
-                        ctx.helpers.showNotification('success', 'Track Deleted', `"${track.name}" has been deleted.`);
+                        ctx.helpers.showNotification(
+                            'success',
+                            'Track Deleted',
+                            `"${track.name}" has been deleted.`,
+                            { undoAction: result.undoAction || null }
+                        );
                         pmRenderTracks(playlistPath);
                     } else {
                         ctx.helpers.showNotification('error', 'Delete Failed', result.error);
@@ -207,7 +225,20 @@ async function pmRenderPlaylists() {
                         window.electronAPI.renamePlaylist({ oldPath: p.path, newName: newName }).then(result => {
                             if (result.success) {
                                 log('Playlist renamed successfully', { oldName: originalName, newName });
-                                ctx.helpers.showNotification('success', 'Renamed', `Playlist renamed to "${newName}".`);
+                                ctx.helpers.showNotification(
+                                    'success',
+                                    'Renamed',
+                                    `Playlist renamed to "${newName}".`,
+                                    {
+                                        undoAction: {
+                                            type: 'rename-playlist',
+                                            payload: {
+                                                currentPath: result.newPath,
+                                                previousName: originalName,
+                                            },
+                                        },
+                                    }
+                                );
                                 const oldPath = p.path;
                                 const favoriteIndex = ctx.state.favoritePlaylists.indexOf(oldPath);
                                 if (favoriteIndex > -1) {
@@ -249,7 +280,12 @@ async function pmRenderPlaylists() {
                     await ctx.playerAPI?.unloadPlaylistByPath?.(p.path);
                     const result = await window.electronAPI.deletePlaylist(p.path);
                     if (result.success) {
-                        ctx.helpers.showNotification('success', 'Playlist Deleted', `"${p.name}" has been deleted.`);
+                        ctx.helpers.showNotification(
+                            'success',
+                            'Playlist Deleted',
+                            `"${p.name}" has been deleted.`,
+                            { undoAction: result.undoAction || null }
+                        );
                         if (ctx.state.pmSelectedPlaylistPath === p.path) {
                             pmTracksContainer.innerHTML = '';
                             pmTracksHeader.textContent = 'Select a playlist';
@@ -278,6 +314,14 @@ export function initializePlaylistManagement(context) {
         pmRenderPlaylists();
         return;
     }
+
+    ctx.pmAPI = ctx.pmAPI || {};
+    ctx.pmAPI.refresh = async () => {
+        await pmRenderPlaylists();
+        if (ctx.state.pmSelectedPlaylistPath) {
+            await pmRenderTracks(ctx.state.pmSelectedPlaylistPath);
+        }
+    };
     
     pmRenderPlaylists();
     ctx.state.isPmInitialized = true;

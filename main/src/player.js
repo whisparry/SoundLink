@@ -277,7 +277,20 @@ async function renamePlaylistFromContext(playlist) {
         return;
     }
 
-    ctx.helpers.showNotification('success', 'Renamed', `Playlist renamed to "${trimmedName}".`);
+    ctx.helpers.showNotification(
+        'success',
+        'Renamed',
+        `Playlist renamed to "${trimmedName}".`,
+        {
+            undoAction: {
+                type: 'rename-playlist',
+                payload: {
+                    currentPath: newPath,
+                    previousName: playlist.name,
+                },
+            },
+        }
+    );
     const oldPath = playlist.path;
     const newPath = result.newPath;
 
@@ -313,7 +326,12 @@ async function deletePlaylistFromContext(playlist) {
         return;
     }
 
-    ctx.helpers.showNotification('success', 'Playlist Deleted', `"${playlist.name}" has been deleted.`);
+    ctx.helpers.showNotification(
+        'success',
+        'Playlist Deleted',
+        `"${playlist.name}" has been deleted.`,
+        { undoAction: result.undoAction || null }
+    );
     playerState.activePlaylistIds = playerState.activePlaylistIds.filter(id => id !== playlist.path);
     if (playerState.selectedPlaylistPath === playlist.path) {
         playerState.selectedPlaylistPath = playerState.activePlaylistIds[0] || null;
@@ -345,7 +363,20 @@ async function renameTrackFromContext(track) {
         return;
     }
 
-    ctx.helpers.showNotification('success', 'Renamed', 'Track renamed successfully.');
+    ctx.helpers.showNotification(
+        'success',
+        'Renamed',
+        'Track renamed successfully.',
+        {
+            undoAction: {
+                type: 'rename-track',
+                payload: {
+                    currentPath: result.newPath,
+                    previousName: track.displayName,
+                },
+            },
+        }
+    );
     await renderActiveTracks({ autoplayFirstTrack: false, preserveCurrentTrack: false });
 }
 
@@ -369,7 +400,12 @@ async function deleteTrackFromContext(track) {
         resetPlaybackState();
     }
 
-    ctx.helpers.showNotification('success', 'Track Deleted', `"${track.displayName}" has been deleted.`);
+    ctx.helpers.showNotification(
+        'success',
+        'Track Deleted',
+        `"${track.displayName}" has been deleted.`,
+        { undoAction: result.undoAction || null }
+    );
     await renderActiveTracks({ autoplayFirstTrack: false, preserveCurrentTrack: true });
 }
 

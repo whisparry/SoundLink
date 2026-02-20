@@ -164,6 +164,7 @@ window.addEventListener('DOMContentLoaded', () => {
         trackToMove: null,
         draggedTrackIndex: null,
         toastTimer: null,
+        activeToastNotificationId: null,
         notificationHistory: [],
         playlistSearchQuery: '',
         spotifySearchDebounce: null,
@@ -512,6 +513,7 @@ window.addEventListener('DOMContentLoaded', () => {
         state: state,
         helpers: { showLoader, hideLoader, saveSettings, showView, showContextMenu, hideContextMenu },
         playerAPI: {},
+        pmAPI: {},
     };
     context.helpers.showConfirmDialog = showConfirmDialog;
     context.helpers.showPromptDialog = showPromptDialog;
@@ -704,11 +706,57 @@ window.addEventListener('DOMContentLoaded', () => {
     function loadNotificationHistory() {
         try {
             const storedHistory = localStorage.getItem('notificationHistory');
-            if (storedHistory) state.notificationHistory = JSON.parse(storedHistory);
+            if (storedHistory) {
+                const parsed = JSON.parse(storedHistory);
+                state.notificationHistory = Array.isArray(parsed) ? parsed.map((entry) => ({
+                    id: entry.id || `${entry.timestamp || Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+                    type: entry.type,
+                    title: entry.title,
+                    message: entry.message,
+                    timestamp: entry.timestamp || new Date().toISOString(),
+                    undoAction: entry.undoAction || null,
+                    undone: Boolean(entry.undone),
+                })) : [];
+            }
         } catch (e) {
             logError('NotificationHistory', 'Failed to load notification history', e);
             state.notificationHistory = [];
         }
+    }
+
+    const findNotificationById = (notificationId) => {
+        return state.notificationHistory.find((entry) => entry.id === notificationId) || null;
+    };
+
+    async function refreshAfterUndo() {
+        if (state.isPlayerInitialized) {
+            await context.playerAPI?.loadAndRenderPlaylists?.();
+        }
+        await context.pmAPI?.refresh?.();
+    }
+
+    async function maybeUndoNotification(notificationId) {
+        const notification = findNotificationById(notificationId);
+        if (!notification || !notification.undoAction || notification.undone) return;
+
+        const confirmed = await showConfirmDialog(
+            'Undo action?',
+            'Undo action?',
+            { confirmText: 'Yes', cancelText: 'No' }
+        );
+        if (!confirmed) return;
+
+        const result = await window.electronAPI.undoAction(notification.undoAction);
+        if (!result?.success) {
+            showNotification('error', 'Undo Failed', result?.error || 'Unable to undo this action.');
+            return;
+        }
+
+        notification.undone = true;
+        saveNotificationHistory();
+        renderNotificationHistory();
+        await refreshAfterUndo();
+        showNotification('success', 'Undo Complete', 'Action has been undone.');
     }
 
     function renderNotificationHistory() {
@@ -722,14 +770,23 @@ window.addEventListener('DOMContentLoaded', () => {
             const item = document.createElement('div');
             item.className = `history-item ${notif.type}`;
             const iconMap = { success: '✓', error: '✗', info: 'ℹ️' };
+            const canUndo = Boolean(notif.undoAction) && !notif.undone;
             item.innerHTML = `
                 <div class="history-icon">${iconMap[notif.type] || 'ℹ️'}</div>
                 <div class="history-content">
                     <p class="history-title">${notif.title}</p>
-                    <p class="history-message">${notif.message}</p>
+                    <p class="history-message">${notif.message}${notif.undone ? ' (undone)' : ''}</p>
                 </div>
                 <div class="history-timestamp">${new Date(notif.timestamp).toLocaleTimeString()}</div>
             `;
+            if (canUndo) {
+                item.style.cursor = 'pointer';
+                item.title = 'Click to undo';
+                item.addEventListener('click', async (event) => {
+                    if (event.button !== 0) return;
+                    await maybeUndoNotification(notif.id);
+                });
+            }
             notificationHistoryContainer.appendChild(item);
         });
     }
@@ -750,15 +807,25 @@ window.addEventListener('DOMContentLoaded', () => {
     });
 
     // --- Toast Notification Logic ---
-    function showNotification(type, title, message) {
+    function showNotification(type, title, message, options = {}) {
         window.electronAPI.incrementNotificationStat();
         const timestamp = new Date().toISOString();
-        state.notificationHistory.unshift({ type, title, message, timestamp });
+        const notification = {
+            id: `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
+            type,
+            title,
+            message,
+            timestamp,
+            undoAction: options.undoAction || null,
+            undone: false,
+        };
+        state.notificationHistory.unshift(notification);
         if (state.notificationHistory.length > 100) state.notificationHistory.pop();
         saveNotificationHistory();
         if (notificationHistoryView.classList.contains('active-view')) renderNotificationHistory();
 
         if (state.toastTimer) clearTimeout(state.toastTimer);
+        state.activeToastNotificationId = notification.id;
         toastTitle.textContent = title;
         toastMessage.textContent = message;
         toastNotification.className = `toast-notification ${type}`;
@@ -772,6 +839,13 @@ window.addEventListener('DOMContentLoaded', () => {
     toastCloseBtn.addEventListener('click', () => {
         if (state.toastTimer) clearTimeout(state.toastTimer);
         toastNotification.classList.add('hidden');
+    });
+
+    toastNotification.addEventListener('click', async (event) => {
+        if (event.button !== 0) return;
+        if (event.target.closest('#toast-close-btn')) return;
+
+        await maybeUndoNotification(state.activeToastNotificationId);
     });
 
     // --- Title Bar Logic ---

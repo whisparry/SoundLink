@@ -21,6 +21,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     createNewPlaylist: () => ipcRenderer.invoke('create-new-playlist'),
     renamePlaylist: (data) => ipcRenderer.invoke('rename-playlist', data),
     renameTrack: (data) => ipcRenderer.invoke('rename-track', data),
+    undoAction: (action) => ipcRenderer.invoke('undo-action', action),
     searchSpotifyPlaylists: (query) => ipcRenderer.invoke('search-spotify-playlists', query),
     getSpotifyItemDetails: (data) => ipcRenderer.invoke('get-spotify-item-details', data),
     openFolderDialog: () => ipcRenderer.invoke('open-folder-dialog'),
