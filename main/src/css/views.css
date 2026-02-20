@@ -703,10 +703,12 @@ input[type=range]::-moz-range-thumb {
 }
 
 .player-content-area {
-    flex-grow: 1;
+    flex: 1 1 auto;
     display: flex;
     gap: 20px;
     min-height: 0;
+    height: 100%;
+    overflow: hidden;
 }
 
 #player-view {
@@ -714,6 +716,9 @@ input[type=range]::-moz-range-thumb {
     box-sizing: border-box;
     overflow: hidden;
     gap: 12px;
+    display: grid !important;
+    grid-template-rows: minmax(0, 1fr) auto;
+    align-items: stretch;
 }
 
 .pm-playlists-panel, .pm-tracks-panel,
@@ -724,6 +729,8 @@ input[type=range]::-moz-range-thumb {
     border-radius: 8px;
     border: 1px solid var(--border-color);
     min-width: 0;
+    min-height: 0;
+    overflow: hidden;
 }
 
 .pm-playlists-panel, .player-playlists-panel {
@@ -1111,9 +1118,10 @@ body.hide-search-bars .playlist-search-bar {
     width: 100%;
     margin-left: 0;
     box-sizing: border-box;
-    position: static;
+    position: relative;
     z-index: 10;
-    margin-top: auto;
+    margin-top: 0;
+    flex-shrink: 0;
     display: flex;
     flex-direction: column;
     gap: 10px;
