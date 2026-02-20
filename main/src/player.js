@@ -43,6 +43,14 @@ function formatTime(seconds) {
     return `${minutes}:${secs < 10 ? '0' : ''}${secs}`;
 }
 
+function getParentDirectory(filePath) {
+    if (typeof filePath !== 'string' || filePath.length === 0) return null;
+    const normalized = filePath.replace(/[\\/]+$/, '');
+    const separatorIndex = Math.max(normalized.lastIndexOf('/'), normalized.lastIndexOf('\\'));
+    if (separatorIndex <= 0) return null;
+    return normalized.slice(0, separatorIndex);
+}
+
 function parseQueuePrefix(name) {
     const match = name.match(/^\s*(\d{3})\s*-\s*(.+)$/);
     if (!match) return { queueNumber: null, displayName: name };
@@ -237,6 +245,130 @@ function updateTracksHeader() {
     playerTracksHeader.textContent = 'Mix';
 }
 
+async function togglePlaylistMix(playlistPath) {
+    const isActive = playerState.activePlaylistIds.includes(playlistPath);
+    const isFirstMixAction = !isActive && playerState.activePlaylistIds.length === 0;
+    const nextActiveIds = isActive
+        ? playerState.activePlaylistIds.filter(id => id !== playlistPath)
+        : [...playerState.activePlaylistIds, playlistPath];
+
+    if (isFirstMixAction) {
+        resetPlaybackState();
+        await setActivePlaylists([playlistPath], { autoplayFirstTrack: true, preserveCurrentTrack: false });
+        return;
+    }
+
+    await setActivePlaylists(nextActiveIds, { autoplayFirstTrack: false, preserveCurrentTrack: true });
+}
+
+async function renamePlaylistFromContext(playlist) {
+    const newName = await ctx.helpers.showPromptDialog(
+        'Rename Playlist',
+        'Enter a new playlist name:',
+        playlist.name,
+        { confirmText: 'Rename', cancelText: 'Cancel' }
+    );
+    const trimmedName = newName?.trim();
+    if (!trimmedName || trimmedName === playlist.name) return;
+
+    const result = await window.electronAPI.renamePlaylist({ oldPath: playlist.path, newName: trimmedName });
+    if (!result.success) {
+        ctx.helpers.showNotification('error', 'Rename Failed', result.error || 'Could not rename playlist.');
+        return;
+    }
+
+    ctx.helpers.showNotification('success', 'Renamed', `Playlist renamed to "${trimmedName}".`);
+    const oldPath = playlist.path;
+    const newPath = result.newPath;
+
+    playerState.activePlaylistIds = playerState.activePlaylistIds.map(id => (id === oldPath ? newPath : id));
+    if (playerState.selectedPlaylistPath === oldPath) playerState.selectedPlaylistPath = newPath;
+
+    if (Array.isArray(ctx.state.favoritePlaylists)) {
+        const favoriteIndex = ctx.state.favoritePlaylists.indexOf(oldPath);
+        if (favoriteIndex > -1) {
+            ctx.state.favoritePlaylists[favoriteIndex] = newPath;
+            await ctx.helpers.saveSettings();
+        }
+    }
+
+    syncSharedActiveState();
+    await renderPlaylists();
+    await renderActiveTracks({ autoplayFirstTrack: false, preserveCurrentTrack: true });
+}
+
+async function deletePlaylistFromContext(playlist) {
+    const confirmed = await ctx.helpers.showConfirmDialog(
+        'Delete Playlist',
+        `Are you sure you want to permanently delete the playlist "${playlist.name}"?`,
+        { confirmText: 'Delete', cancelText: 'Cancel', danger: true }
+    );
+    if (!confirmed) return;
+
+    const result = await window.electronAPI.deletePlaylist(playlist.path);
+    if (!result.success) {
+        ctx.helpers.showNotification('error', 'Delete Failed', result.error || 'Could not delete playlist.');
+        return;
+    }
+
+    ctx.helpers.showNotification('success', 'Playlist Deleted', `"${playlist.name}" has been deleted.`);
+    playerState.activePlaylistIds = playerState.activePlaylistIds.filter(id => id !== playlist.path);
+    if (playerState.selectedPlaylistPath === playlist.path) {
+        playerState.selectedPlaylistPath = playerState.activePlaylistIds[0] || null;
+    }
+
+    if (Array.isArray(ctx.state.favoritePlaylists)) {
+        ctx.state.favoritePlaylists = ctx.state.favoritePlaylists.filter(id => id !== playlist.path);
+        await ctx.helpers.saveSettings();
+    }
+
+    syncSharedActiveState();
+    await renderPlaylists();
+    await renderActiveTracks({ autoplayFirstTrack: false, preserveCurrentTrack: true });
+}
+
+async function renameTrackFromContext(track) {
+    const newName = await ctx.helpers.showPromptDialog(
+        'Rename Track',
+        'Enter new track name (without extension):',
+        track.displayName,
+        { confirmText: 'Rename', cancelText: 'Cancel' }
+    );
+    const trimmedName = newName?.trim();
+    if (!trimmedName || trimmedName === track.displayName) return;
+
+    const result = await window.electronAPI.renameTrack({ oldPath: track.path, newName: trimmedName });
+    if (!result.success) {
+        ctx.helpers.showNotification('error', 'Rename Failed', result.error || 'Could not rename track.');
+        return;
+    }
+
+    ctx.helpers.showNotification('success', 'Renamed', 'Track renamed successfully.');
+    await renderActiveTracks({ autoplayFirstTrack: false, preserveCurrentTrack: false });
+}
+
+async function deleteTrackFromContext(track) {
+    const confirmed = await ctx.helpers.showConfirmDialog(
+        'Delete Track',
+        `Are you sure you want to permanently delete "${track.displayName}"?`,
+        { confirmText: 'Delete', cancelText: 'Cancel', danger: true }
+    );
+    if (!confirmed) return;
+
+    const result = await window.electronAPI.deleteTrack(track.path);
+    if (!result.success) {
+        ctx.helpers.showNotification('error', 'Delete Failed', result.error || 'Could not delete track.');
+        return;
+    }
+
+    if (currentTracklist[currentTrackIndex]?.path === track.path) {
+        resetPlaybackState();
+    }
+
+    ctx.helpers.showNotification('success', 'Track Deleted', `"${track.displayName}" has been deleted.`);
+    await renderActiveTracks({ autoplayFirstTrack: false, preserveCurrentTrack: true });
+}
+
 function updatePlaylistItemVisuals() {
     const { playerPlaylistsContainer } = ctx.elements;
     if (!playerPlaylistsContainer) return;
@@ -256,13 +388,14 @@ function updatePlaylistItemVisuals() {
     });
 }
 
-function buildTracklistForPlaylist(tracks) {
+function buildTracklistForPlaylist(tracks, playlistPath) {
     return tracks
         .filter(t => /\.(m4a|mp3|wav|flac|ogg|webm)$/i.test(t.path))
         .map(track => {
             const parsed = parseQueuePrefix(track.name);
             return {
                 ...track,
+                playlistPath,
                 queueNumber: parsed.queueNumber,
                 displayName: parsed.displayName,
             };
@@ -297,8 +430,8 @@ async function renderActiveTracks(options = {}) {
         const allPlaylistResults = await Promise.all(activeIds.map(playlistPath => window.electronAPI.getPlaylistTracks(playlistPath)));
 
         const mergedTracklist = [];
-        allPlaylistResults.forEach(({ tracks }) => {
-            mergedTracklist.push(...buildTracklistForPlaylist(tracks));
+        allPlaylistResults.forEach(({ tracks }, resultIndex) => {
+            mergedTracklist.push(...buildTracklistForPlaylist(tracks, activeIds[resultIndex]));
         });
 
         currentTracklist = normalizeQueueNumbers(mergedTracklist);
@@ -327,6 +460,53 @@ async function renderActiveTracks(options = {}) {
             const renderedQueueNumber = track.normalizedQueueNumber;
             item.innerHTML = `<span class="track-number">${String(renderedQueueNumber).padStart(2, '0')}</span><span class="player-track-name" title="${track.displayName}">${track.displayName}</span>`;
             item.addEventListener('click', () => playTrack(index));
+
+            item.addEventListener('contextmenu', (event) => {
+                event.preventDefault();
+                const sourcePlaylistPath = track.playlistPath || getParentDirectory(track.path);
+                const sourcePlaylistName = getPlaylistNameByPath(sourcePlaylistPath);
+                const isSourceInMix = Boolean(sourcePlaylistPath && playerState.activePlaylistIds.includes(sourcePlaylistPath));
+                const menuItems = [
+                    {
+                        label: 'Play',
+                        action: () => playTrack(index),
+                    },
+                ];
+
+                if (sourcePlaylistPath) {
+                    menuItems.push({
+                        label: isSourceInMix ? 'Remove from Mix' : 'Add to Mix',
+                        action: async () => {
+                            await togglePlaylistMix(sourcePlaylistPath);
+                            const actionLabel = isSourceInMix ? 'removed from' : 'added to';
+                            ctx.helpers.showNotification('info', 'Mix Updated', `"${sourcePlaylistName}" ${actionLabel} mix.`);
+                        },
+                    });
+                }
+
+                menuItems.push(
+                    { type: 'separator' },
+                    {
+                        label: 'Rename',
+                        action: async () => {
+                            await renameTrackFromContext(track);
+                        },
+                    },
+                    {
+                        label: 'Delete',
+                        action: async () => {
+                            await deleteTrackFromContext(track);
+                        },
+                    },
+                    { type: 'separator' },
+                    {
+                        label: 'Show in Folder',
+                        action: () => window.electronAPI.showInExplorer(track.path),
+                    }
+                );
+
+                ctx.helpers.showContextMenu(event.clientX, event.clientY, menuItems);
+            });
             playerTracksContainer.appendChild(item);
         });
 
@@ -424,26 +604,8 @@ async function renderPlaylists() {
             const addBtn = item.querySelector('.playlist-add-btn');
             addBtn.addEventListener('click', async (event) => {
                 event.stopPropagation();
-                const isActive = playerState.activePlaylistIds.includes(p.path);
-                const isFirstMixAction = !isActive && playerState.activePlaylistIds.length === 0;
-                const nextActiveIds = isActive
-                    ? playerState.activePlaylistIds.filter(id => id !== p.path)
-                    : [...playerState.activePlaylistIds, p.path];
-
-                log('Player playlist mix toggled', {
-                    playlistName: p.name,
-                    playlistPath: p.path,
-                    action: isActive ? 'remove' : 'add',
-                    activeCount: nextActiveIds.length,
-                });
-
-                if (isFirstMixAction) {
-                    resetPlaybackState();
-                    await setActivePlaylists([p.path], { autoplayFirstTrack: true, preserveCurrentTrack: false });
-                    return;
-                }
-
-                await setActivePlaylists(nextActiveIds, { autoplayFirstTrack: false, preserveCurrentTrack: true });
+                log('Player playlist mix toggled', { playlistName: p.name, playlistPath: p.path });
+                await togglePlaylistMix(p.path);
             });
 
             item.addEventListener('click', async (event) => {
@@ -452,6 +614,46 @@ async function renderPlaylists() {
                 log('Player playlist selected (single mode)', { playlistName: p.name, playlistPath: p.path });
                 resetPlaybackState();
                 await setActivePlaylists([p.path], { autoplayFirstTrack: true, preserveCurrentTrack: false });
+            });
+
+            item.addEventListener('contextmenu', (event) => {
+                event.preventDefault();
+                const isInMix = playerState.activePlaylistIds.includes(p.path);
+                const menuItems = [
+                    {
+                        label: 'Play',
+                        action: async () => {
+                            resetPlaybackState();
+                            await setActivePlaylists([p.path], { autoplayFirstTrack: true, preserveCurrentTrack: false });
+                        },
+                    },
+                    {
+                        label: isInMix ? 'Remove from Mix' : 'Add to Mix',
+                        action: async () => {
+                            await togglePlaylistMix(p.path);
+                        },
+                    },
+                    { type: 'separator' },
+                    {
+                        label: 'Rename',
+                        action: async () => {
+                            await renamePlaylistFromContext(p);
+                        },
+                    },
+                    {
+                        label: 'Delete',
+                        action: async () => {
+                            await deletePlaylistFromContext(p);
+                        },
+                    },
+                    { type: 'separator' },
+                    {
+                        label: 'Show in Folder',
+                        action: () => window.electronAPI.showInExplorer(p.path),
+                    },
+                ];
+
+                ctx.helpers.showContextMenu(event.clientX, event.clientY, menuItems);
             });
 
             playerPlaylistsContainer.appendChild(item);

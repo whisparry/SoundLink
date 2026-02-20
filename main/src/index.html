@@ -36,9 +36,6 @@
             <div class="nav-item" id="player-btn" title="Player">
                 <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><polygon points="10 8 16 12 10 16 10 8"></polygon></svg>
             </div>
-            <div class="nav-item" id="playlist-management-btn" title="Playlists">
-                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
-            </div>
             <div class="nav-item" id="console-btn" title="Console">
                 <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"></polyline><line x1="12" y1="19" x2="20" y2="19"></line></svg>
             </div>
@@ -97,67 +94,6 @@
                 <div class="button-container">
                     <button id="download-btn">Download</button>
                     <button id="cancel-btn" class="hidden">Cancel</button>
-                </div>
-            </div>
-
-            <!-- Playlist Management View -->
-            <div id="playlist-management-view" class="view">
-                <h1>Playlist Management</h1>
-                <div class="pm-content-area">
-                    <!-- Left Panel: Playlists -->
-                    <div class="pm-playlists-panel">
-                        <div class="panel-header">
-                            <h2>Playlists</h2>
-                        </div>
-                        <div class="playlist-search-container">
-                            <div class="input-container">
-                                <input type="text" id="pm-playlist-search-input" placeholder="Search playlists...">
-                                <button class="clear-btn hidden">&times;</button>
-                            </div>
-                        </div>
-                        <div id="pm-playlists-container" class="panel-list">
-                            <div id="pm-favorite-playlists-container" class="hidden">
-                                <h4 class="playlist-section-header">Favorites</h4>
-                                <div id="pm-favorite-playlists-grid"></div>
-                            </div>
-                            <h4 id="pm-all-playlists-header" class="playlist-section-header">Playlists</h4>
-                            <div id="pm-all-playlists-grid"></div>
-                        </div>
-                        <div class="panel-footer">
-                            <div id="create-new-playlist-btn-pm" class="playlist-list-item create-playlist-btn">
-                                <span>+ Create New Playlist</span>
-                            </div>
-                        </div>
-                    </div>
-                    <!-- Right Panel: Tracks -->
-                    <div class="pm-tracks-panel">
-                        <div class="panel-header">
-                            <h2 id="pm-tracks-header">Select a playlist</h2>
-                        </div>
-                        <div class="playlist-search-container">
-                            <div class="input-container">
-                                <input type="text" id="pm-track-search-input" placeholder="Search tracks...">
-                                <button class="clear-btn hidden">&times;</button>
-                            </div>
-                        </div>
-                        <div id="pm-tracks-container" class="panel-list">
-                            <!-- Tracks for management will be loaded here -->
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Move Track Modal -->
-            <div id="move-track-modal" class="modal hidden">
-                <div class="modal-content">
-                    <span class="modal-close-btn">&times;</span>
-                    <h2>Move Track</h2>
-                    <p>Move "<span id="move-track-name"></span>" to:</p>
-                    <select id="move-track-destination-select"></select>
-                    <div class="modal-buttons">
-                        <button id="move-track-confirm-btn">Move</button>
-                        <button id="move-track-cancel-btn" class="cancel-btn">Cancel</button>
-                    </div>
                 </div>
             </div>
 

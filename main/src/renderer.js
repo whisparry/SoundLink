@@ -1,5 +1,4 @@
 import { themeNames, themeColors } from './themes.js';
-import { initializePlaylistManagement } from './playlistManagement.js';
 import { initializePlayer } from './player.js';
 
 window.addEventListener('DOMContentLoaded', () => {
@@ -211,7 +210,7 @@ window.addEventListener('DOMContentLoaded', () => {
 
     logDebug('Renderer DOM content loaded');
 
-    const allViews = [homeView, settingsView, advancedSettingsView, playerView, playlistManagementView, statsView, notificationHistoryView, consoleView, helpView];
+    const allViews = [homeView, settingsView, advancedSettingsView, playerView, playlistManagementView, statsView, notificationHistoryView, consoleView, helpView].filter(Boolean);
     const allNavBtns = [homeBtn, settingsBtn, playerBtn, playlistManagementBtn, statsBtn, notificationHistoryBtn, consoleBtn, helpBtn].filter(Boolean);
     async function showView(viewToShow, btnToActivate) {
         log('Switching view', { viewId: viewToShow?.id, navId: btnToActivate?.id });
@@ -516,15 +515,6 @@ window.addEventListener('DOMContentLoaded', () => {
     };
     context.helpers.showConfirmDialog = showConfirmDialog;
     context.helpers.showPromptDialog = showPromptDialog;
-
-    // --- SEARCH EVENT LISTENERS ---
-    if (pmPlaylistSearchInput) {
-        pmPlaylistSearchInput.addEventListener('input', () => {
-            state.playlistSearchQuery = pmPlaylistSearchInput.value.trim().toLowerCase();
-            logTab('PlaylistManagement', 'playlist search changed', { query: state.playlistSearchQuery });
-            if (state.isPmInitialized) initializePlaylistManagement(context); // Re-render
-        });
-    }
 
     // --- Spotify Playlist Search ---
     spotifyFilterBtn.addEventListener('click', (e) => {
@@ -1011,11 +1001,12 @@ window.addEventListener('DOMContentLoaded', () => {
         showView(playerView, playerBtn);
         initializePlayer(context);
     });
-    playlistManagementBtn.addEventListener('click', () => {
-        logTab('PlaylistManagement', 'open requested');
-        showView(playlistManagementView, playlistManagementBtn);
-        initializePlaylistManagement(context);
-    });
+    if (playlistManagementBtn && playlistManagementView) {
+        playlistManagementBtn.addEventListener('click', () => {
+            logTab('PlaylistManagement', 'open requested');
+            showView(playlistManagementView, playlistManagementBtn);
+        });
+    }
     consoleBtn.addEventListener('click', () => {
         logTab('Console', 'open requested');
         showView(consoleView, consoleBtn);
