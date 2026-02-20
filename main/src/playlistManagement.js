@@ -105,6 +105,7 @@ async function pmRenderTracks(playlistPath) {
                 );
                 if (confirmed) {
                     log('Deleting track', { trackName: track.name });
+                    await ctx.playerAPI?.unloadTrackByPath?.(track.path);
                     const result = await window.electronAPI.deleteTrack(track.path);
                     if (result.success) {
                         ctx.helpers.showNotification('success', 'Track Deleted', `"${track.name}" has been deleted.`);
@@ -245,6 +246,7 @@ async function pmRenderPlaylists() {
                 );
                 if (confirmed) {
                     log('Deleting playlist', { playlistName: p.name });
+                    await ctx.playerAPI?.unloadPlaylistByPath?.(p.path);
                     const result = await window.electronAPI.deletePlaylist(p.path);
                     if (result.success) {
                         ctx.helpers.showNotification('success', 'Playlist Deleted', `"${p.name}" has been deleted.`);

@@ -305,6 +305,8 @@ async function deletePlaylistFromContext(playlist) {
     );
     if (!confirmed) return;
 
+    await ctx.playerAPI?.unloadPlaylistByPath?.(playlist.path);
+
     const result = await window.electronAPI.deletePlaylist(playlist.path);
     if (!result.success) {
         ctx.helpers.showNotification('error', 'Delete Failed', result.error || 'Could not delete playlist.');
@@ -354,6 +356,8 @@ async function deleteTrackFromContext(track) {
         { confirmText: 'Delete', cancelText: 'Cancel', danger: true }
     );
     if (!confirmed) return;
+
+    await ctx.playerAPI?.unloadTrackByPath?.(track.path);
 
     const result = await window.electronAPI.deleteTrack(track.path);
     if (!result.success) {
@@ -662,6 +666,47 @@ export function initializePlayer(context) {
 
     ctx.playerAPI.loadAndRenderPlaylists = async () => {
         await renderPlaylists();
+    };
+
+    ctx.playerAPI.unloadTrackByPath = async (trackPath) => {
+        if (!trackPath) return false;
+        const currentTrack = currentTracklist[currentTrackIndex];
+        if (!currentTrack || currentTrack.path !== trackPath) return false;
+
+        log('Unloading currently selected track before delete', { trackPath });
+        resetPlaybackState();
+        return true;
+    };
+
+    ctx.playerAPI.unloadPlaylistByPath = async (playlistPath) => {
+        if (!playlistPath) return false;
+
+        const isActivePlaylist = playerState.activePlaylistIds.includes(playlistPath);
+        const currentTrack = currentTracklist[currentTrackIndex];
+        const isCurrentTrackFromPlaylist =
+            !!currentTrack &&
+            (currentTrack.playlistPath === playlistPath || getParentDirectory(currentTrack.path) === playlistPath);
+
+        if (!isActivePlaylist && !isCurrentTrackFromPlaylist) {
+            return false;
+        }
+
+        log('Unloading playlist before delete', {
+            playlistPath,
+            isActivePlaylist,
+            isCurrentTrackFromPlaylist,
+        });
+
+        if (isCurrentTrackFromPlaylist) {
+            resetPlaybackState();
+        }
+
+        if (isActivePlaylist) {
+            const nextActiveIds = playerState.activePlaylistIds.filter(id => id !== playlistPath);
+            await setActivePlaylists(nextActiveIds, { autoplayFirstTrack: false, preserveCurrentTrack: false });
+        }
+
+        return true;
     };
 
     if (ctx.state.isPlayerInitialized) {
