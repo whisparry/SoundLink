@@ -164,12 +164,15 @@ window.addEventListener('DOMContentLoaded', () => {
     };
 
     // --- Helper Functions ---
+    const log = (...args) => console.log('[SoundLink]', ...args);
+
     const showLoader = () => loadingOverlay.classList.remove('hidden');
     const hideLoader = () => loadingOverlay.classList.add('hidden');
 
     const allViews = [homeView, settingsView, advancedSettingsView, playerView, playlistManagementView, statsView, notificationHistoryView, consoleView, helpView];
     const allNavBtns = [homeBtn, settingsBtn, playerBtn, playlistManagementBtn, statsBtn, notificationHistoryBtn, consoleBtn, helpBtn].filter(Boolean);
     async function showView(viewToShow, btnToActivate) {
+        log('Switching view', { viewId: viewToShow?.id, navId: btnToActivate?.id });
         // FIX: Restore full showView functionality to handle nav button states and saving settings.
         if (settingsView.classList.contains('active-view') || advancedSettingsView.classList.contains('active-view')) {
             await saveSettings();
@@ -690,6 +693,7 @@ window.addEventListener('DOMContentLoaded', () => {
     }
 
     const loadInitialSettings = async () => {
+        log('Loading initial settings...');
         const currentConfig = await window.electronAPI.getSettings();
         const ytdlpCount = await window.electronAPI.getYtdlpCount();
         if (ytdlpCount > 0) {
@@ -710,6 +714,7 @@ window.addEventListener('DOMContentLoaded', () => {
                 root.style.setProperty(prop, `${value}s`);
             };
             setSlider(tabSpeedSlider, tabSpeedValue, '--tab-switch-speed', currentConfig.tabSwitchSpeed || 0.3);
+            log('Initial settings loaded');
             setSlider(dropdownSpeedSlider, dropdownSpeedValue, '--dropdown-speed', currentConfig.dropdownSpeed || 0.4);
             setSlider(themeFadeSlider, themeFadeValue, '--theme-fade-speed', currentConfig.themeFadeSpeed || 0.3);
             fileExtensionInput.value = currentConfig.fileExtension || 'm4a';
@@ -850,11 +855,13 @@ window.addEventListener('DOMContentLoaded', () => {
 
     // --- Advanced Settings Actions ---
     updateYtdlpBtn.addEventListener('click', async () => {
+        log('Manual yt-dlp update check triggered');
         showNotification('info', 'yt-dlp Update', 'Checking for updates...');
         const result = await window.electronAPI.updateYtdlp();
         showNotification('info', 'yt-dlp Update', result);
     });
     checkForUpdatesBtn.addEventListener('click', () => {
+        log('Manual app update check triggered');
         showNotification('info', 'Auto-Updater', 'Checking for updates...');
         window.electronAPI.checkForUpdates();
     });
@@ -916,6 +923,7 @@ window.addEventListener('DOMContentLoaded', () => {
     // --- Download Logic ---
     downloadBtn.addEventListener('click', () => {
         const links = linksInput.value.split('\n').filter(link => link.trim() !== '');
+        log('Download requested', { linkCount: links.length });
         if (links.length === 0) {
             appendConsoleMessage('Please enter at least one link.');
             return;
@@ -932,8 +940,14 @@ window.addEventListener('DOMContentLoaded', () => {
         downloadEta.textContent = 'Estimated time remaining: calculating...';
         window.electronAPI.startDownload(links);
     });
-    cancelBtn.addEventListener('click', () => window.electronAPI.cancelDownload());
-    bigCancelBtn.addEventListener('click', () => window.electronAPI.cancelDownload());
+    cancelBtn.addEventListener('click', () => {
+        log('Download cancel requested from small cancel button');
+        window.electronAPI.cancelDownload();
+    });
+    bigCancelBtn.addEventListener('click', () => {
+        log('Download cancel requested from console cancel button');
+        window.electronAPI.cancelDownload();
+    });
     createPlaylistBtn.addEventListener('click', async () => {
         const result = await window.electronAPI.createPlaylist();
         appendConsoleMessage(result);
@@ -1008,26 +1022,35 @@ window.addEventListener('DOMContentLoaded', () => {
     });
 
     // --- Auto Updater Logic ---
-    window.electronAPI.onShowUpdateNotAvailableNotification(() => showNotification('success', 'Auto-Updater', 'Your application is up to date.'));
+    window.electronAPI.onShowUpdateNotAvailableNotification(() => {
+        log('Update check completed: application is up to date');
+    });
     window.electronAPI.onUpdateAvailable(() => {
+        log('Update available event received');
         updateNotification.classList.remove('hidden');
         updateMessage.textContent = 'A new update is available. Downloading now...';
         showNotification('info', 'Update Found', 'Downloading new version...');
     });
     window.electronAPI.onUpdateDownloadProgress((progressObj) => {
+        log('Update download progress', { percent: progressObj?.percent });
         updateNotification.classList.remove('hidden');
         const progress = progressObj.percent.toFixed(1);
         updateMessage.textContent = `Downloading update... ${progress}%`;
     });
     window.electronAPI.onUpdateDownloaded(() => {
+        log('Update downloaded and ready to install');
         updateNotification.classList.remove('hidden');
         updateMessage.textContent = 'Update downloaded. Click the button to install on restart.';
         restartBtn.classList.remove('hidden');
         showNotification('success', 'Update Ready', 'Click the restart button or the system notification to install.');
     });
-    restartBtn.addEventListener('click', () => window.electronAPI.restartApp());
+    restartBtn.addEventListener('click', () => {
+        log('Restart to update clicked');
+        window.electronAPI.restartApp();
+    });
 
     window.electronAPI.onDownloadProgress(({ progress, eta }) => {
+        log('Download progress event', { progress, eta });
         if (downloadProgressBar) downloadProgressBar.style.width = `${progress}%`;
         if (downloadEta) downloadEta.textContent = `Estimated time remaining: ${eta}`;
     });
@@ -1036,5 +1059,6 @@ window.addEventListener('DOMContentLoaded', () => {
     initializeClearButtons();
     loadNotificationHistory();
     loadInitialSettings();
+    log('Renderer initialized');
     // The player is now initialized when its tab is clicked.
 });
