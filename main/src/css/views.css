@@ -674,7 +674,7 @@ input[type=range]::-moz-range-thumb {
 }
 
 #player-view.active-view {
-    display: flex;
+    display: grid;
     /* FIX: Removed padding from here as it's now on the base #player-view style. */
     box-sizing: border-box;
 }
@@ -716,7 +716,6 @@ input[type=range]::-moz-range-thumb {
     box-sizing: border-box;
     overflow: hidden;
     gap: 12px;
-    display: grid !important;
     grid-template-rows: minmax(0, 1fr) auto;
     align-items: stretch;
 }
