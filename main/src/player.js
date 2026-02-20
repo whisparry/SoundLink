@@ -487,12 +487,6 @@ async function renderActiveTracks(options = {}) {
                 menuItems.push(
                     { type: 'separator' },
                     {
-                        label: 'Rename',
-                        action: async () => {
-                            await renameTrackFromContext(track);
-                        },
-                    },
-                    {
                         label: 'Delete',
                         action: async () => {
                             await deleteTrackFromContext(track);
@@ -620,13 +614,6 @@ async function renderPlaylists() {
                 event.preventDefault();
                 const isInMix = playerState.activePlaylistIds.includes(p.path);
                 const menuItems = [
-                    {
-                        label: 'Play',
-                        action: async () => {
-                            resetPlaybackState();
-                            await setActivePlaylists([p.path], { autoplayFirstTrack: true, preserveCurrentTrack: false });
-                        },
-                    },
                     {
                         label: isInMix ? 'Remove from Mix' : 'Add to Mix',
                         action: async () => {
