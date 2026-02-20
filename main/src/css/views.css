@@ -658,7 +658,7 @@ input[type=range]::-moz-range-thumb {
 
 #player-view {
     /* FIX: Removed justify-content and align-items to allow content to fill the view. */
-    padding: 20px; /* Add padding to the player view itself */
+    /* FIX: Removed padding to allow content to go edge-to-edge. */
 }
 
 #player-view.active-view {
@@ -708,7 +708,7 @@ input[type=range]::-moz-range-thumb {
 }
 
 .pm-playlists-panel, .player-playlists-panel {
-    flex: 0 0 250px;
+    flex: 0 0 200px;
 }
 
 .pm-tracks-panel, .player-tracks-panel {
