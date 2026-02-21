@@ -93,14 +93,54 @@ function findYtdlpExecutables() {
             return;
         }
         const files = fs.readdirSync(ytdlpDir);
-        ytdlpExecutables = files
+        const candidates = files
             .filter(file => file.startsWith('yt-dlp') && file.endsWith('.exe'))
             .map(file => path.join(ytdlpDir, file));
+
+        const withVersion = candidates.map(filePath => {
+            let versionDate = null;
+            try {
+                const versionText = execFileSync(filePath, ['--version'], {
+                    encoding: 'utf8',
+                    windowsHide: true,
+                    maxBuffer: 256 * 1024,
+                }).trim();
+                const dateMatch = versionText.match(/(\d{4})\.(\d{2})\.(\d{2})/);
+                if (dateMatch) {
+                    const [, year, month, day] = dateMatch;
+                    versionDate = Number.parseInt(`${year}${month}${day}`, 10);
+                }
+            } catch {
+                versionDate = null;
+            }
+
+            let mtimeMs = 0;
+            try {
+                mtimeMs = fs.statSync(filePath).mtimeMs;
+            } catch {
+                mtimeMs = 0;
+            }
+
+            return { filePath, versionDate, mtimeMs };
+        });
+
+        withVersion.sort((a, b) => {
+            const versionA = a.versionDate ?? -1;
+            const versionB = b.versionDate ?? -1;
+            if (versionA !== versionB) return versionB - versionA;
+            return b.mtimeMs - a.mtimeMs;
+        });
+
+        const latestVersion = withVersion[0]?.versionDate ?? null;
+        ytdlpExecutables = latestVersion
+            ? withVersion.filter(entry => entry.versionDate === latestVersion).map(entry => entry.filePath)
+            : withVersion.slice(0, 1).map(entry => entry.filePath);
 
         if (ytdlpExecutables.length === 0) {
             console.error(`No 'yt-dlp*.exe' executables found in ${ytdlpDir}`);
         } else {
-            console.log(`Found ${ytdlpExecutables.length} yt-dlp instances.`);
+            const selected = ytdlpExecutables[0];
+            console.log(`Using ${ytdlpExecutables.length} yt-dlp instance(s), selected baseline: ${path.basename(selected)}`);
         }
     } catch (error) {
         console.error('Failed to find yt-dlp executables:', error);
@@ -389,7 +429,8 @@ function getNodeRuntimePath() {
 
 function getYtdlpCommonArgs() {
     const args = [
-        '--extractor-args', 'youtube:player-client=web,default',
+        '--no-update',
+        '--extractor-args', 'youtube:player-client=web',
     ];
 
     const nodeRuntimePath = getNodeRuntimePath();
@@ -713,32 +754,46 @@ app.whenReady().then(() => {
     });
 
     ipcMain.handle('update-ytdlp', async () => {
-        return new Promise((resolve) => {
-            const ytdlpPath = getNextYtdlpPath();
-            if (!ytdlpPath) {
-                return resolve('Error: yt-dlp executable not found.');
-            }
-            const proc = spawn(ytdlpPath, ['-U']);
-            let output = '';
-            proc.stdout.on('data', (data) => output += data.toString());
-            proc.stderr.on('data', (data) => output += data.toString());
-            proc.on('close', (code) => {
-                if (code === 0) {
-                    if (output.includes('is up to date')) {
-                        resolve('Up to date!');
-                    } else if (output.includes('Updated yt-dlp to')) {
-                        resolve('Updated successfully!');
+        const candidates = fs.existsSync(ytdlpDir)
+            ? fs.readdirSync(ytdlpDir)
+                .filter(file => file.startsWith('yt-dlp') && file.endsWith('.exe'))
+                .map(file => path.join(ytdlpDir, file))
+            : [];
+
+        if (candidates.length === 0) {
+            return 'Error: yt-dlp executable not found.';
+        }
+
+        const summary = [];
+        for (const executablePath of candidates) {
+            const result = await new Promise((resolve) => {
+                const proc = spawn(executablePath, ['-U']);
+                let output = '';
+                proc.stdout.on('data', (data) => output += data.toString());
+                proc.stderr.on('data', (data) => output += data.toString());
+                proc.on('close', (code) => {
+                    const name = path.basename(executablePath);
+                    if (code === 0) {
+                        if (output.includes('Updated yt-dlp to')) {
+                            resolve(`${name}: updated`);
+                        } else if (output.includes('is up to date')) {
+                            resolve(`${name}: up to date`);
+                        } else {
+                            resolve(`${name}: update check completed`);
+                        }
                     } else {
-                        resolve('Update check completed.'); // Fallback for unexpected output
+                        resolve(`${name}: failed (exit ${code})`);
                     }
-                } else {
-                    resolve(`Update failed with exit code ${code}:\n${output}`);
-                }
+                });
+                proc.on('error', (err) => {
+                    resolve(`${path.basename(executablePath)}: failed (${err.message})`);
+                });
             });
-            proc.on('error', (err) => {
-                resolve(`Failed to run updater: ${err.message}`);
-            });
-        });
+            summary.push(result);
+        }
+
+        findYtdlpExecutables();
+        return summary.join('\n');
     });
 
     ipcMain.handle('open-folder-dialog', async () => {
