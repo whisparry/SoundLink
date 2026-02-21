@@ -1892,21 +1892,77 @@ app.whenReady().then(() => {
             activeProcesses.add(proc);
             let finalPath = '';
             let stdoutBuffer = '';
+            let stderrBuffer = '';
+
+            const stripAnsi = (text) => text.replace(/\u001b\[[0-9;]*m/g, '');
+
+            const parseDestinationFromLine = (line) => {
+                const extractAudioDestinationMatch = line.match(/\[ExtractAudio\]\s+Destination:\s+(.*)/i);
+                if (extractAudioDestinationMatch) return extractAudioDestinationMatch[1];
+
+                const downloadDestinationMatch = line.match(/\[download\]\s+Destination:\s+(.*)/i);
+                if (downloadDestinationMatch) return downloadDestinationMatch[1];
+
+                const mergedDestinationMatch = line.match(/\[Merger\]\s+Merging formats into\s+"?(.+?)"?$/i);
+                if (mergedDestinationMatch) return mergedDestinationMatch[1];
+
+                const noConvertMatch = line.match(/\[ExtractAudio\]\s+Not converting audio\s+(.*?);\s+file is already in target format/i);
+                if (noConvertMatch) return noConvertMatch[1];
+
+                return null;
+            };
+
+            const processOutputLine = (line) => {
+                const cleanLine = stripAnsi((line || '').trim());
+                if (!cleanLine) return;
+
+                const progressData = parseYtdlpProgressLine(cleanLine);
+                if (progressData && onProgress) {
+                    onProgress(progressData.progress, progressData.etaMs);
+                }
+
+                const parsedDestination = parseDestinationFromLine(cleanLine);
+                if (parsedDestination) {
+                    finalPath = parsedDestination.trim().replace(/^"|"$/g, '');
+                }
+            };
+
+            const findFallbackDownloadedPath = () => {
+                const expectedWithConfiguredExt = path.join(downloadsDir, `${numberPrefix} - ${sanitizedTrackName}.${audioFormat}`);
+                if (fs.existsSync(expectedWithConfiguredExt)) {
+                    return expectedWithConfiguredExt;
+                }
+
+                try {
+                    const expectedPrefix = `${numberPrefix} - ${sanitizedTrackName}.`;
+                    const matchedFile = fs.readdirSync(downloadsDir)
+                        .find(fileName => fileName.startsWith(expectedPrefix));
+                    if (matchedFile) {
+                        return path.join(downloadsDir, matchedFile);
+                    }
+                } catch {
+                    return '';
+                }
+
+                return '';
+            };
+
             proc.stdout.on('data', (data) => {
                 stdoutBuffer += data.toString();
                 const lines = stdoutBuffer.split(/\r?\n|\r/g);
                 stdoutBuffer = lines.pop() || '';
 
                 for (const line of lines) {
-                    const progressData = parseYtdlpProgressLine(line);
-                    if (progressData && onProgress) {
-                        onProgress(progressData.progress, progressData.etaMs);
-                    }
+                    processOutputLine(line);
+                }
+            });
+            proc.stderr.on('data', (data) => {
+                stderrBuffer += data.toString();
+                const lines = stderrBuffer.split(/\r?\n|\r/g);
+                stderrBuffer = lines.pop() || '';
 
-                    const destinationMatch = line.match(/\[ExtractAudio\]\s+Destination:\s+(.*)/i);
-                    if (destinationMatch) {
-                        finalPath = destinationMatch[1].trim();
-                    }
+                for (const line of lines) {
+                    processOutputLine(line);
                 }
             });
             proc.on('close', async (code) => {
@@ -1914,14 +1970,14 @@ app.whenReady().then(() => {
                 if (isDownloadCancelled) return reject(new Error('Download cancelled'));
 
                 if (stdoutBuffer) {
-                    const remainingProgress = parseYtdlpProgressLine(stdoutBuffer);
-                    if (remainingProgress && onProgress) {
-                        onProgress(remainingProgress.progress, remainingProgress.etaMs);
-                    }
-                    const destinationMatch = stdoutBuffer.match(/\[ExtractAudio\]\s+Destination:\s+(.*)/i);
-                    if (destinationMatch) {
-                        finalPath = destinationMatch[1].trim();
-                    }
+                    processOutputLine(stdoutBuffer);
+                }
+                if (stderrBuffer) {
+                    processOutputLine(stderrBuffer);
+                }
+
+                if (code === 0 && !finalPath) {
+                    finalPath = findFallbackDownloadedPath();
                 }
 
                 if (code === 0 && finalPath) {
