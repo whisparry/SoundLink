@@ -125,6 +125,7 @@ function playTrack(index) {
         const track = currentTracklist[index];
         log('Playing track', {
             index,
+            displayQueueNumber: index + 1,
             normalizedQueueNumber: track.normalizedQueueNumber,
             rawQueueNumber: track.queueNumber,
             name: track.displayName,
@@ -545,7 +546,8 @@ function renderTracklistUI() {
         const item = document.createElement('div');
         item.className = 'player-track-item';
         item.dataset.trackIndex = String(index);
-        const renderedQueueNumber = track.normalizedQueueNumber;
+        // Use the current index + 1 for the display number so it always goes 1, 2, 3...
+        const renderedQueueNumber = index + 1;
         item.innerHTML = `<span class="track-number">${String(renderedQueueNumber).padStart(2, '0')}</span><span class="player-track-name" title="${track.displayName}">${track.displayName}</span>`;
         item.addEventListener('click', () => playTrack(index));
 

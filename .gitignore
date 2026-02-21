@@ -6,3 +6,5 @@ dist/
 things to add.txt
 package-lock.json
 yt-dlp/
+.github/
+.vscode/
