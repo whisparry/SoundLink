@@ -28,6 +28,9 @@ const logWarn = (message, data) => emitLog('warn', message, data);
 const logError = (message, data) => emitLog('error', message, data);
 let currentTracklist = [];
 let currentTrackIndex = -1;
+let repeatMode = 0; // 0: off, 1: repeat all, 2: repeat one
+let isShuffle = false;
+let originalTracklist = [];
 let playerState = {
     playlistSearchQuery: '',
     trackSearchQuery: '',
@@ -158,9 +161,22 @@ function togglePlayPause() {
 
 function playNext() {
     log('Play next requested', { currentTrackIndex, trackCount: currentTracklist.length });
+    
+    if (repeatMode === 2) {
+        // Repeat one
+        playTrack(currentTrackIndex);
+        return;
+    }
+
     let nextIndex = currentTrackIndex + 1;
     if (nextIndex >= currentTracklist.length) {
-        nextIndex = 0; // Loop to the beginning
+        if (repeatMode === 1) {
+            nextIndex = 0; // Loop to the beginning
+        } else {
+            // Stop playback
+            resetPlaybackState();
+            return;
+        }
     }
     playTrack(nextIndex);
 }
@@ -171,9 +187,19 @@ function playPrev() {
     if (audio.currentTime > 3) {
         audio.currentTime = 0;
     } else {
+        if (repeatMode === 2) {
+            // Repeat one - just restart the current track
+            audio.currentTime = 0;
+            play();
+            return;
+        }
         let prevIndex = currentTrackIndex - 1;
         if (prevIndex < 0) {
-            prevIndex = currentTracklist.length - 1; // Loop to the end
+            if (repeatMode === 1) {
+                prevIndex = currentTracklist.length - 1; // Loop to the end
+            } else {
+                prevIndex = 0; // Restart first track
+            }
         }
         playTrack(prevIndex);
     }
@@ -448,6 +474,113 @@ function buildTracklistForPlaylist(tracks, playlistPath) {
         });
 }
 
+function shuffleArray(array) {
+    const newArray = [...array];
+    for (let i = newArray.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [newArray[i], newArray[j]] = [newArray[j], newArray[i]];
+    }
+    return newArray;
+}
+
+function toggleShuffle() {
+    isShuffle = !isShuffle;
+    const { shuffleBtn } = ctx.elements;
+    
+    if (isShuffle) {
+        shuffleBtn.classList.add('active');
+        if (currentTracklist.length > 0) {
+            const currentTrack = currentTracklist[currentTrackIndex];
+            currentTracklist = shuffleArray(originalTracklist);
+            if (currentTrack) {
+                currentTrackIndex = currentTracklist.findIndex(t => t.path === currentTrack.path);
+            }
+            renderTracklistUI();
+        }
+    } else {
+        shuffleBtn.classList.remove('active');
+        if (originalTracklist.length > 0) {
+            const currentTrack = currentTracklist[currentTrackIndex];
+            currentTracklist = [...originalTracklist];
+            if (currentTrack) {
+                currentTrackIndex = currentTracklist.findIndex(t => t.path === currentTrack.path);
+            }
+            renderTracklistUI();
+        }
+    }
+    log('Shuffle toggled', { isShuffle });
+}
+
+function cycleRepeat() {
+    repeatMode = (repeatMode + 1) % 3;
+    const { repeatBtn, repeatStatusText } = ctx.elements;
+    
+    if (repeatMode === 0) {
+        repeatBtn.classList.remove('active');
+        if (repeatStatusText) repeatStatusText.textContent = '';
+    } else if (repeatMode === 1) {
+        repeatBtn.classList.add('active');
+        if (repeatStatusText) repeatStatusText.textContent = 'Queue';
+    } else if (repeatMode === 2) {
+        repeatBtn.classList.add('active');
+        if (repeatStatusText) repeatStatusText.textContent = 'Track';
+    }
+    log('Repeat mode changed', { repeatMode });
+}
+
+function renderTracklistUI() {
+    const { playerTracksContainer } = ctx.elements;
+    playerTracksContainer.innerHTML = '';
+
+    if (currentTracklist.length === 0) {
+        playerTracksContainer.innerHTML = `<div class="empty-playlist-message">No supported audio files found in the active playlists.</div>`;
+        return;
+    }
+
+    const filteredTracks = currentTracklist
+        .map((track, index) => ({ track, index }))
+        .filter(({ track }) => track.displayName.toLowerCase().includes(playerState.trackSearchQuery));
+
+    filteredTracks.forEach(({ track, index }) => {
+        const item = document.createElement('div');
+        item.className = 'player-track-item';
+        item.dataset.trackIndex = String(index);
+        const renderedQueueNumber = track.normalizedQueueNumber;
+        item.innerHTML = `<span class="track-number">${String(renderedQueueNumber).padStart(2, '0')}</span><span class="player-track-name" title="${track.displayName}">${track.displayName}</span>`;
+        item.addEventListener('click', () => playTrack(index));
+
+        item.addEventListener('contextmenu', (event) => {
+            event.preventDefault();
+            const menuItems = [
+                {
+                    label: 'Play',
+                    action: () => playTrack(index),
+                },
+            ];
+
+            menuItems.push(
+                { type: 'separator' },
+                {
+                    label: 'Delete',
+                    action: async () => {
+                        await deleteTrackFromContext(track);
+                    },
+                },
+                { type: 'separator' },
+                {
+                    label: 'Show in Folder',
+                    action: () => window.electronAPI.showInExplorer(track.path),
+                }
+            );
+
+            ctx.helpers.showContextMenu(event.clientX, event.clientY, menuItems);
+        });
+        playerTracksContainer.appendChild(item);
+    });
+    
+    highlightCurrentTrack();
+}
+
 async function renderActiveTracks(options = {}) {
     const { autoplayFirstTrack = false, preserveCurrentTrack = true } = options;
     const { playerTracksContainer } = ctx.elements;
@@ -474,8 +607,14 @@ async function renderActiveTracks(options = {}) {
             mergedTracklist.push(...buildTracklistForPlaylist(tracks, activeIds[resultIndex]));
         });
 
-        currentTracklist = normalizeQueueNumbers(mergedTracklist);
-        playerTracksContainer.innerHTML = '';
+        const normalizedTracklist = normalizeQueueNumbers(mergedTracklist);
+        originalTracklist = [...normalizedTracklist];
+        
+        if (isShuffle) {
+            currentTracklist = shuffleArray(normalizedTracklist);
+        } else {
+            currentTracklist = normalizedTracklist;
+        }
 
         if (currentTracklist.length === 0) {
             playerTracksContainer.innerHTML = `<div class="empty-playlist-message">No supported audio files found in the active playlists.</div>`;
@@ -483,52 +622,7 @@ async function renderActiveTracks(options = {}) {
             return;
         }
 
-        const filteredTracks = currentTracklist
-            .map((track, index) => ({ track, index }))
-            .filter(({ track }) => track.displayName.toLowerCase().includes(playerState.trackSearchQuery));
-
-        log('Filtered tracks for render', {
-            activeIds,
-            query: playerState.trackSearchQuery,
-            filteredCount: filteredTracks.length,
-        });
-
-        filteredTracks.forEach(({ track, index }) => {
-            const item = document.createElement('div');
-            item.className = 'player-track-item';
-            item.dataset.trackIndex = String(index);
-            const renderedQueueNumber = track.normalizedQueueNumber;
-            item.innerHTML = `<span class="track-number">${String(renderedQueueNumber).padStart(2, '0')}</span><span class="player-track-name" title="${track.displayName}">${track.displayName}</span>`;
-            item.addEventListener('click', () => playTrack(index));
-
-            item.addEventListener('contextmenu', (event) => {
-                event.preventDefault();
-                const menuItems = [
-                    {
-                        label: 'Play',
-                        action: () => playTrack(index),
-                    },
-                ];
-
-                menuItems.push(
-                    { type: 'separator' },
-                    {
-                        label: 'Delete',
-                        action: async () => {
-                            await deleteTrackFromContext(track);
-                        },
-                    },
-                    { type: 'separator' },
-                    {
-                        label: 'Show in Folder',
-                        action: () => window.electronAPI.showInExplorer(track.path),
-                    }
-                );
-
-                ctx.helpers.showContextMenu(event.clientX, event.clientY, menuItems);
-            });
-            playerTracksContainer.appendChild(item);
-        });
+        renderTracklistUI();
 
         if (preserveCurrentTrack && previousTrackPath) {
             const preservedIndex = currentTracklist.findIndex(track => track.path === previousTrackPath);
@@ -781,8 +875,8 @@ export function initializePlayer(context) {
 
     prevBtn.addEventListener('click', playPrev);
     nextBtn.addEventListener('click', playNext);
-    // shuffleBtn.addEventListener('click', toggleShuffle); // TODO
-    // repeatBtn.addEventListener('click', cycleRepeat); // TODO
+    shuffleBtn.addEventListener('click', toggleShuffle);
+    repeatBtn.addEventListener('click', cycleRepeat);
 
     playerPlaylistSearchInput.addEventListener('input', (e) => {
         playerState.playlistSearchQuery = e.target.value.trim().toLowerCase();

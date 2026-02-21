@@ -1208,7 +1208,7 @@ body.hide-mix-buttons .player-playlists-panel .playlist-add-btn {
     color: var(--text-secondary);
     font-size: 12px;
     font-variant-numeric: tabular-nums;
-    width: 40px; /* Prevents layout shift */
+    min-width: 50px; /* Prevents layout shift */
     text-align: left;
 }
 
