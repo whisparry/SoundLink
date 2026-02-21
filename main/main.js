@@ -75,6 +75,40 @@ let cachedNodeRuntimePath = undefined;
 let manualLinkRequestCounter = 0;
 const pendingManualLinkRequests = new Map();
 
+const DEFAULT_DOWNLOAD_TIMING_STATS = {
+    trackSamples: 0,
+    averageTrackDurationMs: 0,
+    queueSamples: 0,
+    averageQueueDurationMs: 0,
+};
+
+function ensureDownloadTimingStatsShape(targetStats) {
+    if (!targetStats || typeof targetStats !== 'object') return { ...DEFAULT_DOWNLOAD_TIMING_STATS };
+
+    const rawTiming = targetStats.downloadTiming || {};
+    const safeTrackSamples = Number.isFinite(rawTiming.trackSamples) && rawTiming.trackSamples > 0
+        ? Math.floor(rawTiming.trackSamples)
+        : 0;
+    const safeQueueSamples = Number.isFinite(rawTiming.queueSamples) && rawTiming.queueSamples > 0
+        ? Math.floor(rawTiming.queueSamples)
+        : 0;
+    const safeAverageTrackDurationMs = Number.isFinite(rawTiming.averageTrackDurationMs) && rawTiming.averageTrackDurationMs > 0
+        ? rawTiming.averageTrackDurationMs
+        : 0;
+    const safeAverageQueueDurationMs = Number.isFinite(rawTiming.averageQueueDurationMs) && rawTiming.averageQueueDurationMs > 0
+        ? rawTiming.averageQueueDurationMs
+        : 0;
+
+    targetStats.downloadTiming = {
+        trackSamples: safeTrackSamples,
+        averageTrackDurationMs: safeAverageTrackDurationMs,
+        queueSamples: safeQueueSamples,
+        averageQueueDurationMs: safeAverageQueueDurationMs,
+    };
+
+    return targetStats.downloadTiming;
+}
+
 // --- HELPER FUNCTIONS (Pre-Startup) ---
 function formatEta(ms) {
     if (ms < 0 || !isFinite(ms)) return 'calculating...';
@@ -197,12 +231,16 @@ function loadStats() {
                 spotifyLinksProcessed: 0,
                 youtubeLinksProcessed: 0,
                 notificationsReceived: 0,
+                downloadTiming: { ...DEFAULT_DOWNLOAD_TIMING_STATS },
             };
             fs.writeFileSync(statsPath, JSON.stringify(stats, null, 4));
         }
+
+        ensureDownloadTimingStatsShape(stats);
     } catch (error) {
         console.error('Failed to load or create stats file:', error);
         stats = {}; // Fallback
+        ensureDownloadTimingStatsShape(stats);
     }
 }
 
@@ -726,6 +764,7 @@ app.whenReady().then(() => {
             spotifyLinksProcessed: 0,
             youtubeLinksProcessed: 0,
             notificationsReceived: 0,
+            downloadTiming: { ...DEFAULT_DOWNLOAD_TIMING_STATS },
         };
         saveStats();
         return stats;
@@ -1275,20 +1314,73 @@ app.whenReady().then(() => {
             mainWindow.webContents.send('update-status', `Phase 2/2: Downloading ${totalItemsToDownload} tracks...`);
 
             const fileProgress = new Array(totalItemsToDownload).fill(0);
-            const downloadPhaseStartTime = Date.now();
+            const activeTrackTimingEstimates = new Array(totalItemsToDownload).fill(null);
+            const trackStartTimes = new Map();
+            const queueStartTimeMs = Date.now();
+            const downloadTimingStats = ensureDownloadTimingStatsShape(stats);
 
-            const updateOverallProgress = (latestEtaMs = null) => {
-                const totalProgress = fileProgress.reduce((a, b) => a + b, 0) / totalItemsToDownload;
-                const elapsedMs = Date.now() - downloadPhaseStartTime;
-                let etaString = 'calculating...';
+            const pushTrackDurationSample = (durationMs) => {
+                if (!Number.isFinite(durationMs) || durationMs <= 0) return;
 
-                if (latestEtaMs !== null && Number.isFinite(latestEtaMs) && latestEtaMs >= 0) {
-                    etaString = formatEta(latestEtaMs);
-                } else if (totalProgress > 1) {
-                    const totalEstimatedTime = (elapsedMs / totalProgress) * 100;
-                    const remainingMs = totalEstimatedTime - elapsedMs;
-                    etaString = formatEta(remainingMs);
+                const nextSamples = downloadTimingStats.trackSamples + 1;
+                downloadTimingStats.averageTrackDurationMs = downloadTimingStats.trackSamples === 0
+                    ? durationMs
+                    : ((downloadTimingStats.averageTrackDurationMs * downloadTimingStats.trackSamples) + durationMs) / nextSamples;
+                downloadTimingStats.trackSamples = nextSamples;
+            };
+
+            const pushQueueDurationSample = (durationMs) => {
+                if (!Number.isFinite(durationMs) || durationMs <= 0) return;
+
+                const nextSamples = downloadTimingStats.queueSamples + 1;
+                downloadTimingStats.averageQueueDurationMs = downloadTimingStats.queueSamples === 0
+                    ? durationMs
+                    : ((downloadTimingStats.averageQueueDurationMs * downloadTimingStats.queueSamples) + durationMs) / nextSamples;
+                downloadTimingStats.queueSamples = nextSamples;
+            };
+
+            const getEffectiveTrackDurationMs = () => {
+                if (downloadTimingStats.averageTrackDurationMs > 0 && downloadTimingStats.trackSamples > 0) {
+                    return downloadTimingStats.averageTrackDurationMs;
                 }
+
+                const inFlightEstimates = activeTrackTimingEstimates.filter(value => Number.isFinite(value) && value > 0);
+                if (inFlightEstimates.length === 0) return null;
+
+                return inFlightEstimates.reduce((sum, value) => sum + value, 0) / inFlightEstimates.length;
+            };
+
+            const computeSmartEtaMs = () => {
+                const remainingTrackUnits = fileProgress
+                    .reduce((sum, value) => sum + (Math.max(0, 100 - value) / 100), 0);
+
+                const effectiveTrackDurationMs = getEffectiveTrackDurationMs();
+                const trackBasedEtaMs = effectiveTrackDurationMs !== null
+                    ? remainingTrackUnits * effectiveTrackDurationMs
+                    : null;
+
+                const totalProgress = fileProgress.reduce((sum, value) => sum + value, 0);
+                const progressFraction = totalItemsToDownload > 0
+                    ? totalProgress / (totalItemsToDownload * 100)
+                    : 0;
+
+                const queueBasedEtaMs = (downloadTimingStats.averageQueueDurationMs > 0 && downloadTimingStats.queueSamples > 0)
+                    ? downloadTimingStats.averageQueueDurationMs * Math.max(0, 1 - progressFraction)
+                    : null;
+
+                if (trackBasedEtaMs !== null && queueBasedEtaMs !== null) {
+                    return (trackBasedEtaMs + queueBasedEtaMs) / 2;
+                }
+
+                if (trackBasedEtaMs !== null) return trackBasedEtaMs;
+                if (queueBasedEtaMs !== null) return queueBasedEtaMs;
+                return null;
+            };
+
+            const updateOverallProgress = () => {
+                const totalProgress = fileProgress.reduce((a, b) => a + b, 0) / totalItemsToDownload;
+                const smartEtaMs = computeSmartEtaMs();
+                const etaString = smartEtaMs !== null ? formatEta(smartEtaMs) : 'calculating...';
 
                 mainWindow.webContents.send('download-progress', { progress: totalProgress, eta: etaString });
             };
@@ -1301,15 +1393,35 @@ app.whenReady().then(() => {
                     const item = downloadQueue.shift();
                     if (!item) continue;
                     try {
-                        const filePath = await downloadItem(item, item.index, totalItems, (progress, etaMs) => {
+                        const startedAt = Date.now();
+                        trackStartTimes.set(item.queueIndex, startedAt);
+
+                        const filePath = await downloadItem(item, item.index, totalItems, (progress) => {
                             fileProgress[item.queueIndex] = progress;
-                            updateOverallProgress(etaMs);
+                            const elapsedMs = Date.now() - startedAt;
+                            if (progress > 0) {
+                                activeTrackTimingEstimates[item.queueIndex] = elapsedMs / (progress / 100);
+                            }
+                            updateOverallProgress();
                         });
+
+                        const finishedAt = Date.now();
+                        const startTime = trackStartTimes.get(item.queueIndex);
+                        if (Number.isFinite(startTime)) {
+                            pushTrackDurationSample(finishedAt - startTime);
+                        }
+                        trackStartTimes.delete(item.queueIndex);
+                        activeTrackTimingEstimates[item.queueIndex] = null;
                         fileProgress[item.queueIndex] = 100;
                         updateOverallProgress();
                         lastDownloadedFiles.push(filePath);
                         stats.totalSongsDownloaded = (stats.totalSongsDownloaded || 0) + 1;
                     } catch (error) {
+                        trackStartTimes.delete(item.queueIndex);
+                        activeTrackTimingEstimates[item.queueIndex] = null;
+                        fileProgress[item.queueIndex] = 100;
+                        updateOverallProgress();
+
                         if (!isDownloadCancelled) {
                             console.error(`Download worker failed:`, error.message);
                             stats.songsFailed = (stats.songsFailed || 0) + 1;
@@ -1320,6 +1432,7 @@ app.whenReady().then(() => {
             await Promise.all(Array.from({ length: concurrency }, downloadWorker));
 
             if (!isDownloadCancelled) {
+                pushQueueDurationSample(Date.now() - queueStartTimeMs);
                 mainWindow.webContents.send('update-status', 'Task done.', true, { success: true, filesDownloaded: lastDownloadedFiles.length });
             }
 
