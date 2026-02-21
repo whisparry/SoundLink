@@ -97,6 +97,8 @@ window.addEventListener('DOMContentLoaded', () => {
     const normalizeVolumeInput = document.getElementById('normalizeVolume');
     const hideSearchBarsInput = document.getElementById('hideSearchBars');
     const hideMixButtonsInput = document.getElementById('hideMixButtons');
+    const skipManualLinkPromptInput = document.getElementById('skipManualLinkPrompt');
+    const durationToleranceSecondsInput = document.getElementById('durationToleranceSeconds');
     const updateYtdlpBtn = document.getElementById('update-ytdlp-btn');
     const checkForUpdatesBtn = document.getElementById('check-for-updates-btn');
     const clearCacheBtn = document.getElementById('clear-cache-btn');
@@ -376,6 +378,8 @@ window.addEventListener('DOMContentLoaded', () => {
             normalizeVolume: normalizeVolumeInput.checked,
             hideSearchBars: hideSearchBarsInput.checked,
             hideMixButtons: hideMixButtonsInput.checked,
+            skipManualLinkPrompt: skipManualLinkPromptInput.checked,
+            durationToleranceSeconds: parseInt(durationToleranceSecondsInput.value, 10),
         };
         await window.electronAPI.saveSettings(newSettings);
     };
@@ -958,9 +962,11 @@ window.addEventListener('DOMContentLoaded', () => {
             setToggle(hideSearchBarsInput, 'hide-search-bars', currentConfig.hideSearchBars || false);
             setToggle(hideMixButtonsInput, 'hide-mix-buttons', currentConfig.hideMixButtons || false);
             normalizeVolumeInput.checked = currentConfig.normalizeVolume || false;
+            skipManualLinkPromptInput.checked = currentConfig.skipManualLinkPrompt || false;
+            durationToleranceSecondsInput.value = currentConfig.durationToleranceSeconds || 20;
             spotifySearchLimitInput.value = currentConfig.spotifySearchLimit || 10;
         }
-        [fileExtensionInput, downloadThreadsInput, clientIdInput, clientSecretInput, tabSpeedSlider, dropdownSpeedSlider, themeFadeSlider, autoCreatePlaylistInput, hideRefreshButtonsInput, hidePlaylistCountsInput, hideTrackNumbersInput, normalizeVolumeInput, hideSearchBarsInput, hideMixButtonsInput, spotifySearchLimitInput].forEach(input => input.addEventListener('change', saveSettings));
+        [fileExtensionInput, downloadThreadsInput, clientIdInput, clientSecretInput, tabSpeedSlider, dropdownSpeedSlider, themeFadeSlider, autoCreatePlaylistInput, hideRefreshButtonsInput, hidePlaylistCountsInput, hideTrackNumbersInput, normalizeVolumeInput, hideSearchBarsInput, hideMixButtonsInput, spotifySearchLimitInput, skipManualLinkPromptInput, durationToleranceSecondsInput].forEach(input => input.addEventListener('change', saveSettings));
         hideRefreshButtonsInput.addEventListener('change', () => body.classList.toggle('hide-refresh-buttons', hideRefreshButtonsInput.checked));
         hidePlaylistCountsInput.addEventListener('change', () => body.classList.toggle('hide-playlist-counts', hidePlaylistCountsInput.checked));
         hideTrackNumbersInput.addEventListener('change', () => body.classList.toggle('hide-track-numbers', hideTrackNumbersInput.checked));
@@ -979,6 +985,13 @@ window.addEventListener('DOMContentLoaded', () => {
             if (isNaN(value)) return;
             if (value > max) spotifySearchLimitInput.value = max;
             else if (value < min && spotifySearchLimitInput.value !== '') spotifySearchLimitInput.value = min;
+        });
+        durationToleranceSecondsInput.addEventListener('input', () => {
+            const max = parseInt(durationToleranceSecondsInput.max, 10), min = parseInt(durationToleranceSecondsInput.min, 10);
+            let value = parseInt(durationToleranceSecondsInput.value, 10);
+            if (isNaN(value)) return;
+            if (value > max) durationToleranceSecondsInput.value = max;
+            else if (value < min && durationToleranceSecondsInput.value !== '') durationToleranceSecondsInput.value = min;
         });
         populateThemeGrid();
     };
@@ -1171,6 +1184,21 @@ window.addEventListener('DOMContentLoaded', () => {
         }
     });
 
+    window.electronAPI.onManualLinkRequest(async ({ requestId, trackName }) => {
+        const manualLink = await showPromptDialog(
+            'Manual Link Needed',
+            `No duration-matching result found for "${trackName}" on YouTube or SoundCloud. Paste a direct link manually, or cancel to skip this track.`,
+            '',
+            { confirmText: 'Use Link', cancelText: 'Skip Track', placeholder: 'https://...' }
+        );
+
+        window.electronAPI.respondManualLink({
+            requestId,
+            cancelled: !manualLink,
+            link: manualLink || '',
+        });
+    });
+
     // --- Download Logic ---
     downloadBtn.addEventListener('click', () => {
         const links = linksInput.value.split('\n').filter(link => link.trim() !== '');
@@ -1232,6 +1260,8 @@ window.addEventListener('DOMContentLoaded', () => {
         setToggle(hideTrackNumbersInput, 'hide-track-numbers', defaultSettings.hideTrackNumbers || false);
         setToggle(hideSearchBarsInput, 'hide-search-bars', defaultSettings.hideSearchBars || false);
         setToggle(hideMixButtonsInput, 'hide-mix-buttons', defaultSettings.hideMixButtons || false);
+        skipManualLinkPromptInput.checked = defaultSettings.skipManualLinkPrompt || false;
+        durationToleranceSecondsInput.value = defaultSettings.durationToleranceSeconds || 20;
         const setSlider = (slider, valueEl, prop, value) => {
             slider.value = value;
             valueEl.textContent = `${value}s`;

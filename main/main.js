@@ -72,6 +72,8 @@ let cachedYtdlpPluginPath = undefined;
 let hasLoggedMissingYtdlpPlugin = false;
 let cachedYtdlpPluginFlag = undefined;
 let cachedNodeRuntimePath = undefined;
+let manualLinkRequestCounter = 0;
+const pendingManualLinkRequests = new Map();
 
 // --- HELPER FUNCTIONS (Pre-Startup) ---
 function formatEta(ms) {
@@ -169,6 +171,8 @@ function loadConfig() {
                 normalizeVolume: false,
                 hideSearchBars: false,
                 hideMixButtons: false,
+                skipManualLinkPrompt: false,
+                durationToleranceSeconds: 20,
                 playlistsFolderPath: ''
             };
             fs.writeFileSync(configPath, JSON.stringify(config, null, 4));
@@ -408,8 +412,19 @@ function getNodeRuntimePath() {
         return cachedNodeRuntimePath;
     }
 
+    const pathEnv = process.env.PATH || process.env.Path || '';
+    const pathEntries = pathEnv.split(path.delimiter).map(entry => entry.trim()).filter(Boolean);
+
+    for (const entry of pathEntries) {
+        const candidate = path.join(entry, process.platform === 'win32' ? 'node.exe' : 'node');
+        if (fs.existsSync(candidate)) {
+            cachedNodeRuntimePath = candidate;
+            return cachedNodeRuntimePath;
+        }
+    }
+
     try {
-        const whereOutput = execFileSync('where', ['node'], {
+        const whereOutput = execFileSync(process.platform === 'win32' ? 'where.exe' : 'which', ['node'], {
             encoding: 'utf8',
             windowsHide: true,
             maxBuffer: 1024 * 1024,
@@ -430,7 +445,7 @@ function getNodeRuntimePath() {
 function getYtdlpCommonArgs() {
     const args = [
         '--no-update',
-        '--extractor-args', 'youtube:player-client=web',
+        '--extractor-args', 'youtube:player-client=android,web',
     ];
 
     const nodeRuntimePath = getNodeRuntimePath();
@@ -686,6 +701,21 @@ app.whenReady().then(() => {
         saveStats();
     });
 
+    ipcMain.on('manual-link-response', (_event, payload = {}) => {
+        const requestId = Number.parseInt(payload.requestId, 10);
+        if (!Number.isFinite(requestId)) return;
+
+        const pending = pendingManualLinkRequests.get(requestId);
+        if (!pending) return;
+
+        pendingManualLinkRequests.delete(requestId);
+        const manualLink = typeof payload.link === 'string' ? payload.link.trim() : '';
+        pending.resolve({
+            cancelled: Boolean(payload.cancelled),
+            link: manualLink,
+        });
+    });
+
     ipcMain.handle('reset-stats', () => {
         stats = {
             totalSongsDownloaded: 0,
@@ -728,6 +758,8 @@ app.whenReady().then(() => {
             normalizeVolume: false,
             hideSearchBars: false,
             hideMixButtons: false,
+            skipManualLinkPrompt: false,
+            durationToleranceSeconds: 20,
         };
     });
 
@@ -1176,7 +1208,14 @@ app.whenReady().then(() => {
                     if (playlistName && !lastPlaylistName) lastPlaylistName = playlistName;
                     if (tracks) {
                         for (const track of tracks) {
-                            itemsToProcess.push({ type: 'search', query: `${track.name} ${track.artist}`, name: track.name, metadata: track.metadata, index: trackIndex++ });
+                            itemsToProcess.push({
+                                type: 'search',
+                                query: `${track.name} ${track.artist}`,
+                                name: track.name,
+                                metadata: track.metadata,
+                                durationMs: track.durationMs,
+                                index: trackIndex++,
+                            });
                         }
                     }
                 } else {
@@ -1205,9 +1244,10 @@ app.whenReady().then(() => {
                         let youtubeLink;
                         let trackName;
                         if (item.type === 'search') {
-                            youtubeLink = await getYouTubeLink(item.query);
+                            const resolved = await resolveTrackLink(item.query, item.name, item.durationMs);
+                            youtubeLink = resolved.link;
                             trackName = item.name;
-                            mainWindow.webContents.send('update-status', `🔗 (${item.index + 1}/${totalItems}) Found link for: ${trackName}`);
+                            mainWindow.webContents.send('update-status', `🔗 (${item.index + 1}/${totalItems}) Found ${resolved.source} link for: ${trackName}`);
                         } else { // 'direct'
                             youtubeLink = item.link;
                             trackName = await getYouTubeTitle(item.link);
@@ -1388,6 +1428,7 @@ app.whenReady().then(() => {
                         return {
                             name: track.name,
                             artist: track.artists.map(a => a.name).join(', '),
+                            durationMs: track.duration_ms,
                         };
                     }));
                     offset += 100;
@@ -1407,6 +1448,7 @@ app.whenReady().then(() => {
                     tracks.push(...data.body.items.map(track => ({
                         name: track.name,
                         artist: track.artists.map(a => a.name).join(', '),
+                        durationMs: track.duration_ms,
                     })));
                     offset += 50;
                 }
@@ -1416,6 +1458,7 @@ app.whenReady().then(() => {
                 tracks.push({
                     name: track.name,
                     artist: track.artists.map(a => a.name).join(', '),
+                    durationMs: track.duration_ms,
                 });
             }
             return { tracks: tracks.filter(Boolean), playlistName };
@@ -1457,14 +1500,130 @@ app.whenReady().then(() => {
         });
     }
 
+    function getDurationToleranceMs() {
+        const configured = Number.parseInt(config.durationToleranceSeconds, 10);
+        const safeSeconds = Number.isFinite(configured) && configured >= 0 ? configured : 20;
+        return safeSeconds * 1000;
+    }
+
+    function parseSearchCandidates(rawOutput) {
+        return rawOutput
+            .split(/\r?\n/)
+            .map(line => line.trim())
+            .filter(Boolean)
+            .map(line => {
+                const [url = '', durationText = ''] = line.split('\t');
+                const parsedDurationSec = Number.parseFloat(durationText);
+                return {
+                    url: url.trim(),
+                    durationMs: Number.isFinite(parsedDurationSec) ? Math.round(parsedDurationSec * 1000) : null,
+                };
+            })
+            .filter(candidate => candidate.url);
+    }
+
+    function isDurationMatch(candidateDurationMs, expectedDurationMs) {
+        if (!Number.isFinite(expectedDurationMs) || expectedDurationMs <= 0) {
+            return true;
+        }
+        if (!Number.isFinite(candidateDurationMs) || candidateDurationMs <= 0) {
+            return false;
+        }
+
+        return Math.abs(candidateDurationMs - expectedDurationMs) <= getDurationToleranceMs();
+    }
+
+    async function searchCandidates(providerPrefix, query, expectedDurationMs, maxResults = 5) {
+        const rawOutput = await runYtdlp([
+            '--flat-playlist',
+            '--print', '%(webpage_url)s\t%(duration)s',
+            `${providerPrefix}${maxResults}:${query}`,
+        ]);
+
+        const candidates = parseSearchCandidates(rawOutput);
+        return candidates.find(candidate => isDurationMatch(candidate.durationMs, expectedDurationMs)) || null;
+    }
+
+    async function requestManualLink(trackName, query) {
+        if (config.skipManualLinkPrompt) {
+            return null;
+        }
+
+        if (!mainWindow || mainWindow.isDestroyed()) {
+            return null;
+        }
+
+        return new Promise((resolve) => {
+            const requestId = ++manualLinkRequestCounter;
+            const timeoutHandle = setTimeout(() => {
+                pendingManualLinkRequests.delete(requestId);
+                resolve(null);
+            }, 2 * 60 * 1000);
+
+            pendingManualLinkRequests.set(requestId, {
+                resolve: (response) => {
+                    clearTimeout(timeoutHandle);
+                    if (response?.cancelled) {
+                        resolve(null);
+                        return;
+                    }
+                    const manualLink = typeof response?.link === 'string' ? response.link.trim() : '';
+                    resolve(manualLink || null);
+                },
+            });
+
+            mainWindow.webContents.send('manual-link-request', {
+                requestId,
+                trackName,
+                query,
+            });
+        });
+    }
+
+    async function resolveTrackLink(query, trackName, expectedDurationMs) {
+        const youtubeMatch = await searchCandidates('ytsearch', query, expectedDurationMs);
+        if (youtubeMatch) {
+            return { link: youtubeMatch.url, source: 'youtube' };
+        }
+
+        mainWindow.webContents.send('update-status', `⚠️ No duration-matching YouTube result for: ${trackName}. Trying SoundCloud...`);
+        const soundCloudMatch = await searchCandidates('scsearch', query, expectedDurationMs);
+        if (soundCloudMatch) {
+            return { link: soundCloudMatch.url, source: 'soundcloud' };
+        }
+
+        mainWindow.webContents.send('update-status', `⚠️ No duration-matching SoundCloud result for: ${trackName}.`);
+        const manualLink = await requestManualLink(trackName, query);
+        if (manualLink) {
+            return { link: manualLink, source: 'manual' };
+        }
+
+        throw new Error('No matching result found in YouTube/SoundCloud and no manual link provided.');
+    }
+
     async function getYouTubeLink(query) {
         if (linkCache[query]) {
             mainWindow.webContents.send('update-status', `[Cache] Found link for: ${query}`);
             return linkCache[query];
         }
-        const videoId = await runYtdlp(['--get-id', `ytsearch1:"${query}"`]);
+
+        let videoId = '';
+        try {
+            const searchOutput = await runYtdlp(['--flat-playlist', '--playlist-items', '1', '--print', 'id', `ytsearch1:${query}`]);
+            videoId = searchOutput
+                .split(/\r?\n/)
+                .map(line => line.trim())
+                .find(Boolean) || '';
+        } catch (flatSearchError) {
+            const fallbackOutput = await runYtdlp(['--get-id', `ytsearch1:${query}`]);
+            videoId = fallbackOutput
+                .split(/\r?\n/)
+                .map(line => line.trim())
+                .find(Boolean) || '';
+        }
+
         if (!videoId) throw new Error('No video found for query.');
-        const youtubeLink = `https://www.youtube.com/watch?v=${videoId.trim()}`;
+        const youtubeLink = `https://www.youtube.com/watch?v=${videoId}`;
         linkCache[query] = youtubeLink;
         saveCache();
         return youtubeLink;
