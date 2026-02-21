@@ -160,7 +160,7 @@ function togglePlayPause() {
     }
 }
 
-function playNext() {
+async function playNext() {
     log('Play next requested', { currentTrackIndex, trackCount: currentTracklist.length });
     
     if (repeatMode === 2) {
@@ -174,8 +174,8 @@ function playNext() {
         if (repeatMode === 1) {
             nextIndex = 0; // Loop to the beginning
         } else {
-            // Stop playback
-            resetPlaybackState();
+            // Queue finished with repeat off: unload active playlists completely
+            await setActivePlaylists([], { autoplayFirstTrack: false, preserveCurrentTrack: false });
             return;
         }
     }
