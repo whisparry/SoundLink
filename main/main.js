@@ -1,7 +1,7 @@
 const { app, BrowserWindow, ipcMain, dialog, shell, Tray, Menu, globalShortcut, Notification } = require('electron');
 const { autoUpdater } = require('electron-updater');
 const path = require('path');
-const { spawn } = require('child_process');
+const { spawn, execFileSync } = require('child_process');
 const fs = require('fs');
 const SpotifyWebApi = require('spotify-web-api-node');
 const mm = require('music-metadata');
@@ -52,6 +52,8 @@ const statsPath = path.join(app.getPath('userData'), 'stats.json');
 const cachePath = path.join(app.getPath('userData'), 'link_cache.json');
 const undoTrashPath = path.join(app.getPath('userData'), 'undo-trash');
 const ytdlpDir = isDev ? path.join(__dirname, 'yt-dlp') : path.join(process.resourcesPath, 'yt-dlp');
+const userDataPluginRoot = path.join(app.getPath('userData'), 'yt-dlp-plugins');
+const ytdlpGetPotPluginDir = path.join(userDataPluginRoot, 'yt-dlp-get-pot');
 
 // --- STATE VARIABLES ---
 let config = {};
@@ -66,6 +68,10 @@ let ytdlpInstanceIndex = 0;
 let lastDownloadedFiles = [];
 let lastPlaylistName = null;
 let isDownloadCancelled = false;
+let cachedYtdlpPluginPath = undefined;
+let hasLoggedMissingYtdlpPlugin = false;
+let cachedYtdlpPluginFlag = undefined;
+let cachedNodeRuntimePath = undefined;
 
 // --- HELPER FUNCTIONS (Pre-Startup) ---
 function formatEta(ms) {
@@ -208,6 +214,243 @@ function getNextYtdlpPath() {
     const path = ytdlpExecutables[ytdlpInstanceIndex];
     ytdlpInstanceIndex = (ytdlpInstanceIndex + 1) % ytdlpExecutables.length;
     return path;
+}
+
+function copyDirectoryRecursive(sourceDir, destinationDir) {
+    if (!fs.existsSync(destinationDir)) {
+        fs.mkdirSync(destinationDir, { recursive: true });
+    }
+
+    for (const entry of fs.readdirSync(sourceDir, { withFileTypes: true })) {
+        const sourcePath = path.join(sourceDir, entry.name);
+        const destinationPath = path.join(destinationDir, entry.name);
+
+        if (entry.isDirectory()) {
+            copyDirectoryRecursive(sourcePath, destinationPath);
+        } else {
+            fs.copyFileSync(sourcePath, destinationPath);
+        }
+    }
+}
+
+function hasFilesInDirectory(directoryPath) {
+    if (!fs.existsSync(directoryPath)) return false;
+    const entries = fs.readdirSync(directoryPath, { withFileTypes: true });
+    return entries.some(entry => entry.isFile() || entry.isDirectory());
+}
+
+function isValidYtdlpPluginDirectory(directoryPath) {
+    if (!directoryPath || !fs.existsSync(directoryPath)) return false;
+    return fs.existsSync(path.join(directoryPath, 'yt_dlp_plugins'));
+}
+
+function resolveYtdlpPluginSourcePath(sourceCandidates) {
+    for (const candidate of sourceCandidates) {
+        if (!fs.existsSync(candidate)) continue;
+
+        if (isValidYtdlpPluginDirectory(candidate)) {
+            return candidate;
+        }
+
+        const nestedGetPot = path.join(candidate, 'yt-dlp-get-pot');
+        if (isValidYtdlpPluginDirectory(nestedGetPot)) {
+            return nestedGetPot;
+        }
+    }
+
+    return null;
+}
+
+function ensureYtdlpGetPotPlugin() {
+    try {
+        if (cachedYtdlpPluginPath !== undefined) {
+            return cachedYtdlpPluginPath;
+        }
+
+        if (isValidYtdlpPluginDirectory(ytdlpGetPotPluginDir)) {
+            cachedYtdlpPluginPath = ytdlpGetPotPluginDir;
+            return cachedYtdlpPluginPath;
+        }
+
+        const packagedCandidates = [
+            path.join(process.resourcesPath, 'yt-dlp-get-pot'),
+            path.join(process.resourcesPath, 'plugins', 'yt-dlp-get-pot'),
+            path.join(process.resourcesPath, 'plugins'),
+            path.join(process.resourcesPath, 'yt-dlp', 'plugins', 'yt-dlp-get-pot'),
+            path.join(process.resourcesPath, 'yt-dlp', 'plugins'),
+        ];
+
+        const devCandidates = [
+            path.join(__dirname, 'yt-dlp-get-pot'),
+            path.join(__dirname, 'plugins', 'yt-dlp-get-pot'),
+            path.join(__dirname, 'plugins'),
+            path.join(__dirname, 'yt-dlp', 'plugins', 'yt-dlp-get-pot'),
+            path.join(__dirname, 'yt-dlp', 'plugins'),
+        ];
+
+        const sourceCandidates = isDev ? [...devCandidates, ...packagedCandidates] : [...packagedCandidates, ...devCandidates];
+        const pluginSourcePath = resolveYtdlpPluginSourcePath(sourceCandidates);
+
+        if (!pluginSourcePath) {
+            if (!hasLoggedMissingYtdlpPlugin) {
+                writeLog('warn', 'YTDLPPlugin', 'yt-dlp-get-pot plugin source folder not found in resources', {
+                    sourceCandidates,
+                    expectedLayout: '.../yt-dlp-get-pot/yt_dlp_plugins/** or .../yt-dlp/plugins/yt_dlp_plugins/**',
+                });
+                hasLoggedMissingYtdlpPlugin = true;
+            }
+            cachedYtdlpPluginPath = null;
+            return null;
+        }
+
+        fs.mkdirSync(userDataPluginRoot, { recursive: true });
+        copyDirectoryRecursive(pluginSourcePath, ytdlpGetPotPluginDir);
+        if (!isValidYtdlpPluginDirectory(ytdlpGetPotPluginDir)) {
+            writeLog('warn', 'YTDLPPlugin', 'Plugin files copied but expected yt_dlp_plugins folder was not found', {
+                copiedFrom: pluginSourcePath,
+                copiedTo: ytdlpGetPotPluginDir,
+            });
+            cachedYtdlpPluginPath = null;
+            return null;
+        }
+        writeLog('info', 'YTDLPPlugin', 'yt-dlp-get-pot plugin copied to userData', {
+            from: pluginSourcePath,
+            to: ytdlpGetPotPluginDir,
+        });
+        cachedYtdlpPluginPath = ytdlpGetPotPluginDir;
+        return cachedYtdlpPluginPath;
+    } catch (error) {
+        writeLog('error', 'YTDLPPlugin', 'Failed to prepare yt-dlp-get-pot plugin', { error: error.message });
+        cachedYtdlpPluginPath = null;
+        return null;
+    }
+}
+
+function getYtdlpPluginFlag() {
+    if (cachedYtdlpPluginFlag !== undefined) {
+        return cachedYtdlpPluginFlag;
+    }
+
+    const ytdlpPath = ytdlpExecutables[0] || getNextYtdlpPath();
+    if (!ytdlpPath) {
+        cachedYtdlpPluginFlag = null;
+        return null;
+    }
+
+    try {
+        const helpOutput = execFileSync(ytdlpPath, ['--help'], {
+            encoding: 'utf8',
+            windowsHide: true,
+            maxBuffer: 8 * 1024 * 1024,
+        });
+
+        if (helpOutput.includes('--plugin-path')) {
+            cachedYtdlpPluginFlag = '--plugin-path';
+            return cachedYtdlpPluginFlag;
+        }
+
+        if (helpOutput.includes('--plugin-dirs')) {
+            cachedYtdlpPluginFlag = '--plugin-dirs';
+            return cachedYtdlpPluginFlag;
+        }
+
+        cachedYtdlpPluginFlag = null;
+        return null;
+    } catch (error) {
+        writeLog('warn', 'YTDLPPlugin', 'Failed to detect yt-dlp plugin CLI option', { error: error.message });
+        cachedYtdlpPluginFlag = null;
+        return null;
+    }
+}
+
+function getNodeRuntimePath() {
+    if (cachedNodeRuntimePath !== undefined) {
+        return cachedNodeRuntimePath;
+    }
+
+    try {
+        const whereOutput = execFileSync('where', ['node'], {
+            encoding: 'utf8',
+            windowsHide: true,
+            maxBuffer: 1024 * 1024,
+        });
+        const firstPath = whereOutput
+            .split(/\r?\n/)
+            .map(line => line.trim())
+            .find(Boolean);
+
+        cachedNodeRuntimePath = firstPath || null;
+        return cachedNodeRuntimePath;
+    } catch {
+        cachedNodeRuntimePath = null;
+        return null;
+    }
+}
+
+function getYtdlpCommonArgs() {
+    const args = [
+        '--extractor-args', 'youtube:player-client=web,default',
+    ];
+
+    const nodeRuntimePath = getNodeRuntimePath();
+    if (nodeRuntimePath) {
+        const normalizedNodePath = nodeRuntimePath.replace(/\\/g, '/');
+        args.push('--js-runtimes', `node:${normalizedNodePath}`);
+    }
+
+    const bgutilScriptPath = path.join(app.getPath('home'), 'bgutil-ytdlp-pot-provider', 'server', 'build', 'generate_once.js');
+    if (fs.existsSync(bgutilScriptPath)) {
+        const normalizedScriptPath = bgutilScriptPath.replace(/\\/g, '/');
+        args.push('--extractor-args', `youtubepot-bgutilscript:script_path=${normalizedScriptPath}`);
+    }
+
+    const pluginPath = ensureYtdlpGetPotPlugin();
+    if (pluginPath) {
+        const pluginFlag = getYtdlpPluginFlag();
+        if (pluginFlag) {
+            args.push(pluginFlag, pluginPath);
+        } else {
+            writeLog('warn', 'YTDLPPlugin', 'No supported yt-dlp plugin CLI option detected; plugin path argument skipped');
+        }
+    }
+
+    return args;
+}
+
+function parseYtdlpEtaToMs(etaText) {
+    if (!etaText) return null;
+    const parts = etaText.trim().split(':').map(part => Number.parseInt(part, 10));
+    if (parts.some(Number.isNaN)) return null;
+
+    if (parts.length === 3) {
+        const [hours, minutes, seconds] = parts;
+        return ((hours * 3600) + (minutes * 60) + seconds) * 1000;
+    }
+    if (parts.length === 2) {
+        const [minutes, seconds] = parts;
+        return ((minutes * 60) + seconds) * 1000;
+    }
+    if (parts.length === 1) {
+        return parts[0] * 1000;
+    }
+
+    return null;
+}
+
+function parseYtdlpProgressLine(line) {
+    const progressMatch = line.match(/\[download\]\s+([\d.]+)%/i);
+    if (!progressMatch) return null;
+
+    const progress = Number.parseFloat(progressMatch[1]);
+    if (!Number.isFinite(progress)) return null;
+
+    const etaMatch = line.match(/ETA\s+([0-9:]+)/i);
+    const etaText = etaMatch ? etaMatch[1] : null;
+    return {
+        progress,
+        etaText,
+        etaMs: parseYtdlpEtaToMs(etaText),
+    };
 }
 
 // --- INITIAL SETUP ---
@@ -845,6 +1088,13 @@ app.whenReady().then(() => {
         if (!linksArray || linksArray.length === 0) return mainWindow.webContents.send('update-status', 'No links provided.', true, { success: false });
         if (ytdlpExecutables.length === 0) return mainWindow.webContents.send('update-status', 'Error: No yt-dlp executable found.', true, { success: false });
 
+        const pluginPath = ensureYtdlpGetPotPlugin();
+        if (pluginPath) {
+            mainWindow.webContents.send('update-status', `yt-dlp plugin ready: ${pluginPath}`);
+        } else {
+            mainWindow.webContents.send('update-status', 'Warning: yt-dlp-get-pot plugin not found in resources; continuing without plugin override.');
+        }
+
         stats.downloadsInitiated = (stats.downloadsInitiated || 0) + 1;
         lastDownloadedFiles = [];
         lastPlaylistName = null;
@@ -932,15 +1182,19 @@ app.whenReady().then(() => {
             const fileProgress = new Array(totalItemsToDownload).fill(0);
             const downloadPhaseStartTime = Date.now();
 
-            const updateOverallProgress = () => {
+            const updateOverallProgress = (latestEtaMs = null) => {
                 const totalProgress = fileProgress.reduce((a, b) => a + b, 0) / totalItemsToDownload;
                 const elapsedMs = Date.now() - downloadPhaseStartTime;
                 let etaString = 'calculating...';
-                if (totalProgress > 1) {
+
+                if (latestEtaMs !== null && Number.isFinite(latestEtaMs) && latestEtaMs >= 0) {
+                    etaString = formatEta(latestEtaMs);
+                } else if (totalProgress > 1) {
                     const totalEstimatedTime = (elapsedMs / totalProgress) * 100;
                     const remainingMs = totalEstimatedTime - elapsedMs;
                     etaString = formatEta(remainingMs);
                 }
+
                 mainWindow.webContents.send('download-progress', { progress: totalProgress, eta: etaString });
             };
 
@@ -952,9 +1206,9 @@ app.whenReady().then(() => {
                     const item = downloadQueue.shift();
                     if (!item) continue;
                     try {
-                        const filePath = await downloadItem(item, item.index, totalItems, (progress) => {
+                        const filePath = await downloadItem(item, item.index, totalItems, (progress, etaMs) => {
                             fileProgress[item.queueIndex] = progress;
-                            updateOverallProgress();
+                            updateOverallProgress(etaMs);
                         });
                         fileProgress[item.queueIndex] = 100;
                         updateOverallProgress();
@@ -1129,7 +1383,7 @@ app.whenReady().then(() => {
             if (isDownloadCancelled) return reject(new Error('Operation cancelled'));
             const ytdlpPath = getNextYtdlpPath();
             if (!ytdlpPath) return reject(new Error('No yt-dlp executable found.'));
-            const proc = spawn(ytdlpPath, args);
+            const proc = spawn(ytdlpPath, [...getYtdlpCommonArgs(), ...args]);
             activeProcesses.add(proc);
             let stdout = '', stderr = '';
 
@@ -1191,26 +1445,42 @@ app.whenReady().then(() => {
             if (isDownloadCancelled) return reject(new Error('Download cancelled'));
             const ytdlpPath = getNextYtdlpPath();
             if (!ytdlpPath) return reject(new Error('No yt-dlp executable found.'));
-            const proc = spawn(ytdlpPath, args);
+            const proc = spawn(ytdlpPath, [...getYtdlpCommonArgs(), ...args]);
             activeProcesses.add(proc);
             let finalPath = '';
+            let stdoutBuffer = '';
             proc.stdout.on('data', (data) => {
-                const output = data.toString();
-                const progressMatch = output.match(/\[download\]\s+([\d.]+)%/);
-                if (progressMatch && onProgress) {
-                    onProgress(parseFloat(progressMatch[1]));
-                } else {
-                    const progressMatchSimple = output.match(/(\d+)%/);
-                    if (progressMatchSimple && onProgress) {
-                        onProgress(parseFloat(progressMatchSimple[1]));
+                stdoutBuffer += data.toString();
+                const lines = stdoutBuffer.split(/\r?\n|\r/g);
+                stdoutBuffer = lines.pop() || '';
+
+                for (const line of lines) {
+                    const progressData = parseYtdlpProgressLine(line);
+                    if (progressData && onProgress) {
+                        onProgress(progressData.progress, progressData.etaMs);
+                    }
+
+                    const destinationMatch = line.match(/\[ExtractAudio\]\s+Destination:\s+(.*)/i);
+                    if (destinationMatch) {
+                        finalPath = destinationMatch[1].trim();
                     }
                 }
-                const destinationMatch = output.match(/\[ExtractAudio\] Destination: (.*)/);
-                if (destinationMatch) finalPath = destinationMatch[1].trim();
             });
             proc.on('close', async (code) => {
                 activeProcesses.delete(proc);
                 if (isDownloadCancelled) return reject(new Error('Download cancelled'));
+
+                if (stdoutBuffer) {
+                    const remainingProgress = parseYtdlpProgressLine(stdoutBuffer);
+                    if (remainingProgress && onProgress) {
+                        onProgress(remainingProgress.progress, remainingProgress.etaMs);
+                    }
+                    const destinationMatch = stdoutBuffer.match(/\[ExtractAudio\]\s+Destination:\s+(.*)/i);
+                    if (destinationMatch) {
+                        finalPath = destinationMatch[1].trim();
+                    }
+                }
+
                 if (code === 0 && finalPath) {
                     mainWindow.webContents.send('update-status', `✅ [${index + 1}/${total}] Finished: "${sanitizedTrackName}"`);
                     resolve(finalPath);
