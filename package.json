@@ -5,6 +5,7 @@
   "main": "main/main.js",
   "scripts": {
     "start": "electron .",
+    "prebuild": "node main/scripts/prepare-build.js",
     "build": "electron-builder"
   },
   "author": "whisparry",
@@ -38,14 +39,22 @@
       "output": "dist"
     },
     "files": [
-      "main/**/*"
+      "main/**/*",
+      "!main/node_modules{,/**}",
+      "!main/yt-dlp{,/**}",
+      "!main/downloads{,/**}",
+      "!main/scripts{,/**}",
+      "!**/*.old"
     ],
     "extraResources": [
       {
         "from": "main/yt-dlp",
         "to": "yt-dlp",
         "filter": [
-          "**/*"
+          "yt-dlp.exe",
+          "ffmpeg.exe",
+          "ffprobe.exe",
+          "plugins/**/*"
         ]
       },
       {
