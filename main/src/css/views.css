@@ -378,6 +378,42 @@ input[type=number] {
     font-size: 14px;
 }
 
+.sleep-timer-settings-group {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.sleep-timer-settings-group label {
+    margin-bottom: 0;
+    min-width: 100%;
+}
+
+.settings-sleep-timer-btn {
+    margin-top: 0;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.settings-sleep-timer-btn.active {
+    border-color: var(--accent-primary);
+    color: var(--accent-primary);
+}
+
+.settings-sleep-timer-display {
+    display: inline-flex;
+    align-items: center;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    padding: 5px 10px;
+    border: 1px solid var(--border-color);
+    border-radius: 14px;
+    background-color: var(--bg-secondary);
+}
+
 input[type=range] {
     -webkit-appearance: none;
     appearance: none;

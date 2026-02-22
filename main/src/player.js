@@ -45,6 +45,7 @@ let spectrogramHeight = 0;
 
 let sleepTimerInterval = null;
 let sleepTimerEndTime = null;
+let persistVolumeTimeout = null;
 
 const VISUAL_SYNC_SMOOTHING = 0.2;
 const SPECTROGRAM_BAR_COUNT = 40;
@@ -432,12 +433,29 @@ function startVisualThemeSyncLoop() {
 }
 
 function setVolume(level) {
-    logDebug('Setting volume', { level });
-    audio.volume = level;
+    const normalizedLevel = clamp(Number.parseFloat(level), 0, 1);
+    const safeLevel = Number.isFinite(normalizedLevel) ? normalizedLevel : 1;
+    logDebug('Setting volume', { level: safeLevel });
+    audio.volume = safeLevel;
     const { volumeIconUp, volumeIconMute } = ctx.elements;
-    audio.muted = level === 0;
+    audio.muted = safeLevel === 0;
     volumeIconUp.classList.toggle('hidden', audio.muted);
     volumeIconMute.classList.toggle('hidden', !audio.muted);
+}
+
+function persistVolumeSetting() {
+    if (!window.electronAPI?.saveSettings) return;
+    if (persistVolumeTimeout) {
+        clearTimeout(persistVolumeTimeout);
+    }
+
+    persistVolumeTimeout = setTimeout(() => {
+        const playerVolume = audio.muted ? 0 : audio.volume;
+        window.electronAPI.saveSettings({ playerVolume }).catch(error => {
+            logWarn('Failed to persist player volume', { error: error?.message });
+        });
+        persistVolumeTimeout = null;
+    }, 150);
 }
 
 function toggleMute() {
@@ -510,12 +528,32 @@ function showSleepTimerMenu(event) {
         { label: '30 minutes', action: () => setSleepTimer(30) },
         { label: '45 minutes', action: () => setSleepTimer(45) },
         { label: '60 minutes', action: () => setSleepTimer(60) },
+        { label: 'Custom...', action: () => { void promptCustomSleepTimer(); } },
         { type: 'separator' },
         { label: 'Cancel Timer', action: () => setSleepTimer(0) }
     ];
     
     const rect = event.currentTarget.getBoundingClientRect();
     ctx.helpers.showContextMenu(rect.left, rect.bottom + 5, menuItems);
+}
+
+async function promptCustomSleepTimer() {
+    const rawMinutes = await ctx.helpers.showPromptDialog(
+        'Custom Sleep Timer',
+        'Enter timer duration in minutes (1-1440).',
+        '90',
+        { confirmText: 'Set Timer', cancelText: 'Cancel', placeholder: 'Minutes' }
+    );
+
+    if (rawMinutes === null) return;
+
+    const minutes = Number.parseInt(rawMinutes, 10);
+    if (!Number.isFinite(minutes) || minutes < 1 || minutes > 1440) {
+        window.alert('Please enter a whole number between 1 and 1440 minutes.');
+        return;
+    }
+
+    setSleepTimer(minutes);
 }
 
 // --- Playlist & Track Rendering ---
@@ -1195,6 +1233,7 @@ export function initializePlayer(context) {
     audio.addEventListener('volumechange', () => {
         logDebug('Audio volume changed', { muted: audio.muted, volume: audio.volume });
         if (volumeSlider) volumeSlider.value = audio.muted ? 0 : audio.volume;
+        persistVolumeSetting();
     });
 
     // --- Event Listeners for UI Controls ---
@@ -1230,7 +1269,18 @@ export function initializePlayer(context) {
     renderPlaylists();
     updateTracksHeader();
     renderActiveTracks();
-    setVolume(volumeSlider.value);
+    window.electronAPI.getSettings()
+        .then((settings = {}) => {
+            const configuredVolume = clamp(Number.parseFloat(settings.playerVolume), 0, 1);
+            const startupVolume = Number.isFinite(configuredVolume) ? configuredVolume : clamp(Number.parseFloat(volumeSlider.value), 0, 1);
+            const safeStartupVolume = Number.isFinite(startupVolume) ? startupVolume : 1;
+            volumeSlider.value = safeStartupVolume;
+            setVolume(safeStartupVolume);
+        })
+        .catch((error) => {
+            logWarn('Failed to load saved player volume; using current slider value', { error: error?.message });
+            setVolume(volumeSlider.value);
+        });
     updatePlayPauseButton(false);
     updateNowPlaying();
 

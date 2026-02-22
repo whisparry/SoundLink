@@ -213,6 +213,9 @@ function loadConfig() {
             if (!Number.isFinite(Number.parseInt(config.silenceTrimThresholdDb, 10))) {
                 config.silenceTrimThresholdDb = 35;
             }
+            if (!Number.isFinite(Number.parseFloat(config.playerVolume))) {
+                config.playerVolume = 1;
+            }
         } else {
             config = { 
                 theme: 'dark',
@@ -234,6 +237,7 @@ function loadConfig() {
                 skipManualLinkPrompt: false,
                 durationToleranceSeconds: 20,
                 silenceTrimThresholdDb: 35,
+                playerVolume: 1,
                 playlistsFolderPath: ''
             };
             fs.writeFileSync(configPath, JSON.stringify(config, null, 4));
@@ -857,6 +861,7 @@ app.whenReady().then(() => {
             skipManualLinkPrompt: false,
             durationToleranceSeconds: 20,
             silenceTrimThresholdDb: 35,
+            playerVolume: 1,
         };
     });
 

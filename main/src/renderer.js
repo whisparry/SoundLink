@@ -389,6 +389,7 @@ window.addEventListener('DOMContentLoaded', () => {
             skipManualLinkPrompt: skipManualLinkPromptInput.checked,
             durationToleranceSeconds: parseInt(durationToleranceSecondsInput.value, 10),
             silenceTrimThresholdDb: parseInt(silenceTrimThresholdDbInput.value, 10),
+            playerVolume: Number.parseFloat(volumeSlider.value),
         };
         await window.electronAPI.saveSettings(newSettings);
     };
@@ -1107,6 +1108,8 @@ window.addEventListener('DOMContentLoaded', () => {
             durationToleranceSecondsInput.value = currentConfig.durationToleranceSeconds || 20;
             silenceTrimThresholdDbInput.value = currentConfig.silenceTrimThresholdDb || 35;
             spotifySearchLimitInput.value = currentConfig.spotifySearchLimit || 10;
+            const savedPlayerVolume = Number.parseFloat(currentConfig.playerVolume);
+            volumeSlider.value = Number.isFinite(savedPlayerVolume) ? Math.min(Math.max(savedPlayerVolume, 0), 1) : 1;
         }
         [fileExtensionInput, downloadThreadsInput, clientIdInput, clientSecretInput, tabSpeedSlider, dropdownSpeedSlider, themeFadeSlider, autoCreatePlaylistInput, hideRefreshButtonsInput, hidePlaylistCountsInput, hideTrackNumbersInput, normalizeVolumeInput, hideSearchBarsInput, hideMixButtonsInput, visualThemeSyncInput, spotifySearchLimitInput, skipManualLinkPromptInput, durationToleranceSecondsInput, silenceTrimThresholdDbInput].forEach(input => input.addEventListener('change', saveSettings));
         hideRefreshButtonsInput.addEventListener('change', () => body.classList.toggle('hide-refresh-buttons', hideRefreshButtonsInput.checked));
@@ -1414,6 +1417,9 @@ window.addEventListener('DOMContentLoaded', () => {
         skipManualLinkPromptInput.checked = defaultSettings.skipManualLinkPrompt || false;
         durationToleranceSecondsInput.value = defaultSettings.durationToleranceSeconds || 20;
         silenceTrimThresholdDbInput.value = defaultSettings.silenceTrimThresholdDb || 35;
+        volumeSlider.value = Number.isFinite(Number.parseFloat(defaultSettings.playerVolume))
+            ? Number.parseFloat(defaultSettings.playerVolume)
+            : 1;
         const setSlider = (slider, valueEl, prop, value) => {
             slider.value = value;
             valueEl.textContent = `${value}s`;
@@ -1585,6 +1591,7 @@ window.addEventListener('DOMContentLoaded', () => {
     initializeClearButtons();
     loadNotificationHistory();
     loadInitialSettings();
+    initializePlayer(context);
     log('Renderer initialized');
-    // The player is now initialized when its tab is clicked.
+    // Player is initialized at startup so settings-level sleep timer is available immediately.
 });

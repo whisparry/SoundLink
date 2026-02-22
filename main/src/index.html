@@ -51,10 +51,6 @@
         </div>
 
         <div class="content">
-            <div id="sleep-timer-btn" class="global-sleep-timer" title="Sleep Timer">
-                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
-                <span id="sleep-timer-display" class="hidden"></span>
-            </div>
             <div id="update-notification" class="update-notification hidden">
                 <p id="update-message"></p>
                 <button id="restart-btn" class="hidden">Restart to Update</button>
@@ -298,6 +294,14 @@
                 <div class="settings-group">
                     <label for="silenceTrimThresholdDb">Silence Trim Threshold (dB)</label>
                     <input type="number" id="silenceTrimThresholdDb" placeholder="10-80" min="10" max="80">
+                </div>
+                <div class="settings-group sleep-timer-settings-group">
+                    <label for="sleep-timer-btn">Sleep Timer</label>
+                    <button id="sleep-timer-btn" type="button" class="secondary-btn settings-sleep-timer-btn" title="Sleep Timer">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+                        <span>Set Sleep Timer</span>
+                    </button>
+                    <span id="sleep-timer-display" class="hidden settings-sleep-timer-display"></span>
                 </div>
                  
                 <div class="settings-category">
