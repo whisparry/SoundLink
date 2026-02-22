@@ -51,6 +51,10 @@
         </div>
 
         <div class="content">
+            <div id="sleep-timer-btn" class="global-sleep-timer" title="Sleep Timer">
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+                <span id="sleep-timer-display" class="hidden"></span>
+            </div>
             <div id="update-notification" class="update-notification hidden">
                 <p id="update-message"></p>
                 <button id="restart-btn" class="hidden">Restart to Update</button>
@@ -396,10 +400,6 @@
                                 </button>
                             </div>
                             <div class="volume-container">
-                                <button id="sleep-timer-btn" class="shuffle-btn" title="Sleep Timer" style="margin-right: 10px;">
-                                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
-                                </button>
-                                <span id="sleep-timer-display" class="hidden" style="font-size: 12px; color: var(--text-secondary); margin-right: 10px; min-width: 35px; text-align: right;"></span>
                                 <div id="volume-icon-container">
                                     <svg id="volume-icon-up" class="player-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path></svg>
                                     <svg id="volume-icon-mute" class="player-icon hidden" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><line x1="23" y1="9" x2="17" y2="15"></line><line x1="17" y1="9" x2="23" y2="15"></line></svg>

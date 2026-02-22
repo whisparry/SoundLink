@@ -515,7 +515,7 @@ function showSleepTimerMenu(event) {
     ];
     
     const rect = event.currentTarget.getBoundingClientRect();
-    ctx.helpers.showContextMenu(rect.left, rect.top - 200, menuItems);
+    ctx.helpers.showContextMenu(rect.left, rect.bottom + 5, menuItems);
 }
 
 // --- Playlist & Track Rendering ---
