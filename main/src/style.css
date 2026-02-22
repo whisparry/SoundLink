@@ -17,6 +17,8 @@
     --tab-switch-speed: 0.3s;
     --dropdown-speed: 0.4s;
     --theme-fade-speed: 0.3s;
+    --audio-visual-level: 0;
+    --audio-spectrogram-rgb: 59, 130, 246;
 }
 
 * {
@@ -114,6 +116,35 @@ body, html {
 .content {
     flex-grow: 1;
     position: relative;
+    overflow: hidden;
+}
+
+#audio-spectrogram-overlay {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    z-index: 1;
+    opacity: 0;
+    transition: opacity 0.2s ease;
+    mix-blend-mode: soft-light;
+}
+
+body.audio-visual-sync-enabled.audio-visual-sync-active #audio-spectrogram-overlay {
+    opacity: 1;
+}
+
+body.audio-visual-sync-enabled .container {
+    transition: box-shadow 120ms linear;
+}
+
+body.audio-visual-sync-enabled.audio-visual-sync-active .container {
+    box-shadow: inset 0 0 calc(20px + (140px * var(--audio-visual-level))) var(--accent-primary);
+}
+
+body.audio-visual-sync-enabled.audio-visual-sync-active #now-playing {
+    letter-spacing: calc(var(--audio-visual-level) * 0.4px);
 }
 
 /* Toast Notification Styles */
@@ -235,6 +266,7 @@ body, html {
     overflow-y: auto;
     opacity: 0;
     pointer-events: none;
+    z-index: 2;
     transition: opacity var(--tab-switch-speed) ease-in-out;
 }
 
@@ -1327,6 +1359,14 @@ body.hide-mix-buttons .player-playlists-panel .playlist-add-btn {
     background-color: var(--bg-tertiary);
     border-radius: 3px;
     cursor: pointer;
+    position: relative;
+    touch-action: none;
+    user-select: none;
+    transition: height 0.12s ease;
+}
+
+#progress-bar-container.seeking {
+    height: 10px;
 }
 
 #progress-bar {
@@ -1334,6 +1374,7 @@ body.hide-mix-buttons .player-playlists-panel .playlist-add-btn {
     height: 100%;
     background-color: var(--accent-primary);
     border-radius: 3px;
+    transition: width 0.08s linear;
 }
 
 #current-time, #total-duration {

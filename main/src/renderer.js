@@ -97,6 +97,7 @@ window.addEventListener('DOMContentLoaded', () => {
     const normalizeVolumeInput = document.getElementById('normalizeVolume');
     const hideSearchBarsInput = document.getElementById('hideSearchBars');
     const hideMixButtonsInput = document.getElementById('hideMixButtons');
+    const visualThemeSyncInput = document.getElementById('visualThemeSync');
     const skipManualLinkPromptInput = document.getElementById('skipManualLinkPrompt');
     const durationToleranceSecondsInput = document.getElementById('durationToleranceSeconds');
     const silenceTrimThresholdDbInput = document.getElementById('silenceTrimThresholdDb');
@@ -113,6 +114,7 @@ window.addEventListener('DOMContentLoaded', () => {
     const downloadProgressContainer = document.getElementById('download-progress-container');
     const downloadProgressBar = document.getElementById('download-progress-bar');
     const downloadEta = document.getElementById('download-eta');
+    const spectrogramCanvas = document.getElementById('audio-spectrogram-overlay');
     const contextMenu = document.getElementById('context-menu');
 
     const nowPlaying = document.getElementById('now-playing');
@@ -176,6 +178,7 @@ window.addEventListener('DOMContentLoaded', () => {
         spotifyPreviewTracks: [],
         activeSilenceTrimJobId: null,
         lastSilenceTrimProgressTick: 0,
+        visualThemeSync: false,
     };
 
     // --- Helper Functions ---
@@ -382,6 +385,7 @@ window.addEventListener('DOMContentLoaded', () => {
             normalizeVolume: normalizeVolumeInput.checked,
             hideSearchBars: hideSearchBarsInput.checked,
             hideMixButtons: hideMixButtonsInput.checked,
+            visualThemeSync: visualThemeSyncInput.checked,
             skipManualLinkPrompt: skipManualLinkPromptInput.checked,
             durationToleranceSeconds: parseInt(durationToleranceSecondsInput.value, 10),
             silenceTrimThresholdDb: parseInt(silenceTrimThresholdDbInput.value, 10),
@@ -486,6 +490,7 @@ window.addEventListener('DOMContentLoaded', () => {
             normalizeVolumeInput,
             hideSearchBarsInput,
             hideMixButtonsInput,
+            visualThemeSyncInput,
             updateYtdlpBtn,
             clearCacheBtn,
             spotifyLink,
@@ -498,6 +503,7 @@ window.addEventListener('DOMContentLoaded', () => {
             downloadProgressContainer,
             downloadProgressBar,
             downloadEta,
+            spectrogramCanvas,
             shuffleBtn,
             repeatBtn,
             repeatStatusText,
@@ -526,6 +532,12 @@ window.addEventListener('DOMContentLoaded', () => {
     };
     context.helpers.showConfirmDialog = showConfirmDialog;
     context.helpers.showPromptDialog = showPromptDialog;
+
+    const setVisualThemeSyncEnabled = (enabled) => {
+        state.visualThemeSync = Boolean(enabled);
+        body.classList.toggle('audio-visual-sync-enabled', state.visualThemeSync);
+        context.playerAPI?.applyVisualThemeSyncSetting?.(state.visualThemeSync);
+    };
 
     // --- Spotify Playlist Search ---
     spotifyFilterBtn.addEventListener('click', (e) => {
@@ -894,11 +906,60 @@ window.addEventListener('DOMContentLoaded', () => {
         toggleSecretBtn.textContent = isPassword ? 'Hide' : 'Show';
     });
 
+    function parseHexColor(colorValue) {
+        if (typeof colorValue !== 'string') return null;
+        const value = colorValue.trim();
+        const shortHexMatch = /^#([\da-f]{3})$/i.exec(value);
+        if (shortHexMatch) {
+            const expanded = shortHexMatch[1].split('').map(char => char + char).join('');
+            return [
+                Number.parseInt(expanded.slice(0, 2), 16),
+                Number.parseInt(expanded.slice(2, 4), 16),
+                Number.parseInt(expanded.slice(4, 6), 16),
+            ];
+        }
+
+        const fullHexMatch = /^#([\da-f]{6})$/i.exec(value);
+        if (!fullHexMatch) return null;
+        return [
+            Number.parseInt(fullHexMatch[1].slice(0, 2), 16),
+            Number.parseInt(fullHexMatch[1].slice(2, 4), 16),
+            Number.parseInt(fullHexMatch[1].slice(4, 6), 16),
+        ];
+    }
+
+    function blendRgb(baseRgb, targetRgb, ratio) {
+        const safeRatio = Math.min(Math.max(ratio, 0), 1);
+        return baseRgb.map((channel, index) => Math.round(channel + ((targetRgb[index] - channel) * safeRatio)));
+    }
+
+    function getRelativeLuminance(rgb) {
+        const normalized = rgb.map((channel) => {
+            const value = channel / 255;
+            return value <= 0.03928
+                ? value / 12.92
+                : ((value + 0.055) / 1.055) ** 2.4;
+        });
+
+        return (0.2126 * normalized[0]) + (0.7152 * normalized[1]) + (0.0722 * normalized[2]);
+    }
+
+    function updateSpectrogramTint(theme) {
+        const baseColor = parseHexColor(theme?.['--bg-primary'])
+            || parseHexColor(theme?.['--accent-primary'])
+            || [59, 130, 246];
+        const isDarkTheme = getRelativeLuminance(baseColor) < 0.45;
+        const targetTone = isDarkTheme ? [255, 255, 255] : [0, 0, 0];
+        const tintColor = blendRgb(baseColor, targetTone, 0.26);
+        root.style.setProperty('--audio-spectrogram-rgb', `${tintColor[0]}, ${tintColor[1]}, ${tintColor[2]}`);
+    }
+
     function applyTheme(themeName) {
         const theme = themeColors[themeName];
         if (!theme) return;
         logTab('Settings', 'theme applied', { themeName });
         for (const [key, value] of Object.entries(theme)) root.style.setProperty(key, value);
+        updateSpectrogramTint(theme);
         state.currentThemeName = themeName;
         document.querySelectorAll('.theme-button').forEach(btn => btn.classList.toggle('active', btn.dataset.theme === themeName));
     }
@@ -973,17 +1034,20 @@ window.addEventListener('DOMContentLoaded', () => {
             setToggle(hideSearchBarsInput, 'hide-search-bars', currentConfig.hideSearchBars || false);
             setToggle(hideMixButtonsInput, 'hide-mix-buttons', currentConfig.hideMixButtons || false);
             normalizeVolumeInput.checked = currentConfig.normalizeVolume || false;
+            visualThemeSyncInput.checked = currentConfig.visualThemeSync || false;
+            setVisualThemeSyncEnabled(visualThemeSyncInput.checked);
             skipManualLinkPromptInput.checked = currentConfig.skipManualLinkPrompt || false;
             durationToleranceSecondsInput.value = currentConfig.durationToleranceSeconds || 20;
             silenceTrimThresholdDbInput.value = currentConfig.silenceTrimThresholdDb || 35;
             spotifySearchLimitInput.value = currentConfig.spotifySearchLimit || 10;
         }
-        [fileExtensionInput, downloadThreadsInput, clientIdInput, clientSecretInput, tabSpeedSlider, dropdownSpeedSlider, themeFadeSlider, autoCreatePlaylistInput, hideRefreshButtonsInput, hidePlaylistCountsInput, hideTrackNumbersInput, normalizeVolumeInput, hideSearchBarsInput, hideMixButtonsInput, spotifySearchLimitInput, skipManualLinkPromptInput, durationToleranceSecondsInput, silenceTrimThresholdDbInput].forEach(input => input.addEventListener('change', saveSettings));
+        [fileExtensionInput, downloadThreadsInput, clientIdInput, clientSecretInput, tabSpeedSlider, dropdownSpeedSlider, themeFadeSlider, autoCreatePlaylistInput, hideRefreshButtonsInput, hidePlaylistCountsInput, hideTrackNumbersInput, normalizeVolumeInput, hideSearchBarsInput, hideMixButtonsInput, visualThemeSyncInput, spotifySearchLimitInput, skipManualLinkPromptInput, durationToleranceSecondsInput, silenceTrimThresholdDbInput].forEach(input => input.addEventListener('change', saveSettings));
         hideRefreshButtonsInput.addEventListener('change', () => body.classList.toggle('hide-refresh-buttons', hideRefreshButtonsInput.checked));
         hidePlaylistCountsInput.addEventListener('change', () => body.classList.toggle('hide-playlist-counts', hidePlaylistCountsInput.checked));
         hideTrackNumbersInput.addEventListener('change', () => body.classList.toggle('hide-track-numbers', hideTrackNumbersInput.checked));
         hideSearchBarsInput.addEventListener('change', () => body.classList.toggle('hide-search-bars', hideSearchBarsInput.checked));
         hideMixButtonsInput.addEventListener('change', () => body.classList.toggle('hide-mix-buttons', hideMixButtonsInput.checked));
+        visualThemeSyncInput.addEventListener('change', () => setVisualThemeSyncEnabled(visualThemeSyncInput.checked));
         downloadThreadsInput.addEventListener('input', () => {
             const max = parseInt(downloadThreadsInput.max, 10), min = parseInt(downloadThreadsInput.min, 10);
             let value = parseInt(downloadThreadsInput.value, 10);
@@ -1106,6 +1170,7 @@ window.addEventListener('DOMContentLoaded', () => {
         logTab('Player', 'open requested');
         showView(playerView, playerBtn);
         initializePlayer(context);
+        context.playerAPI?.applyVisualThemeSyncSetting?.(state.visualThemeSync);
     });
     if (playlistManagementBtn && playlistManagementView) {
         playlistManagementBtn.addEventListener('click', () => {

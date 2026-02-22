@@ -31,6 +31,20 @@ let currentTrackIndex = -1;
 let repeatMode = 0; // 0: off, 1: repeat all, 2: repeat one
 let isShuffle = false;
 let originalTracklist = [];
+let isSeekDragging = false;
+let activeSeekPointerId = null;
+let audioContext = null;
+let audioSourceNode = null;
+let audioAnalyserNode = null;
+let audioFrequencyData = null;
+let visualSyncFrameId = null;
+let visualSyncLevel = 0;
+let spectrogramContext = null;
+let spectrogramWidth = 0;
+let spectrogramHeight = 0;
+
+const VISUAL_SYNC_SMOOTHING = 0.2;
+const SPECTROGRAM_BAR_COUNT = 56;
 let playerState = {
     playlistSearchQuery: '',
     trackSearchQuery: '',
@@ -44,6 +58,10 @@ function formatTime(seconds) {
     const minutes = Math.floor(seconds / 60);
     const secs = Math.floor(seconds % 60);
     return `${minutes}:${secs < 10 ? '0' : ''}${secs}`;
+}
+
+function clamp(value, min, max) {
+    return Math.min(Math.max(value, min), max);
 }
 
 function getParentDirectory(filePath) {
@@ -103,7 +121,7 @@ function updatePlayPauseButton(isPlaying) {
 
 function updateUI() {
     const { progressBar, currentTime, totalDuration } = ctx.elements;
-    const progress = (audio.currentTime / audio.duration) * 100;
+    const progress = audio.duration ? (audio.currentTime / audio.duration) * 100 : 0;
     progressBar.style.width = `${progress || 0}%`;
     currentTime.textContent = formatTime(audio.currentTime);
     totalDuration.textContent = formatTime(audio.duration || 0);
@@ -207,12 +225,202 @@ function playPrev() {
 }
 
 
-function seek(event) {
+function seekByClientX(clientX) {
     const { progressBarContainer } = ctx.elements;
+    if (!Number.isFinite(audio.duration) || audio.duration <= 0) return;
+
     const bounds = progressBarContainer.getBoundingClientRect();
-    const percentage = (event.clientX - bounds.left) / bounds.width;
+    if (bounds.width <= 0) return;
+
+    const percentage = clamp((clientX - bounds.left) / bounds.width, 0, 1);
     logDebug('Seek requested', { percentage });
     audio.currentTime = audio.duration * percentage;
+    updateUI();
+}
+
+function seek(event) {
+    seekByClientX(event.clientX);
+}
+
+function handleSeekPointerDown(event) {
+    if (event.button !== undefined && event.button !== 0) return;
+
+    isSeekDragging = true;
+    activeSeekPointerId = event.pointerId;
+    ctx.elements.progressBarContainer.classList.add('seeking');
+    if (typeof ctx.elements.progressBarContainer.setPointerCapture === 'function') {
+        ctx.elements.progressBarContainer.setPointerCapture(event.pointerId);
+    }
+    seekByClientX(event.clientX);
+}
+
+function handleSeekPointerMove(event) {
+    if (!isSeekDragging) return;
+    if (activeSeekPointerId !== null && event.pointerId !== activeSeekPointerId) return;
+    seekByClientX(event.clientX);
+}
+
+function clearSeekDragState() {
+    isSeekDragging = false;
+    activeSeekPointerId = null;
+    ctx.elements.progressBarContainer.classList.remove('seeking');
+}
+
+function handleSeekPointerUp(event) {
+    if (!isSeekDragging) return;
+    if (activeSeekPointerId !== null && event.pointerId !== activeSeekPointerId) return;
+
+    seekByClientX(event.clientX);
+    if (typeof ctx.elements.progressBarContainer.releasePointerCapture === 'function') {
+        try {
+            ctx.elements.progressBarContainer.releasePointerCapture(event.pointerId);
+        } catch (_) {
+            // noop
+        }
+    }
+    clearSeekDragState();
+}
+
+function resetVisualSyncState() {
+    visualSyncLevel = 0;
+    ctx.elements.root?.style.setProperty('--audio-visual-level', '0');
+    ctx.elements.body?.classList.remove('audio-visual-sync-active');
+    clearSpectrogram();
+}
+
+function getSpectrogramContext() {
+    const spectrogramCanvas = ctx.elements.spectrogramCanvas;
+    if (!spectrogramCanvas) return null;
+
+    if (!spectrogramContext) {
+        spectrogramContext = spectrogramCanvas.getContext('2d', { alpha: true });
+    }
+
+    return spectrogramContext;
+}
+
+function resizeSpectrogramCanvasIfNeeded() {
+    const spectrogramCanvas = ctx.elements.spectrogramCanvas;
+    const drawContext = getSpectrogramContext();
+    if (!spectrogramCanvas || !drawContext) return;
+
+    const dpr = window.devicePixelRatio || 1;
+    const targetWidth = Math.max(1, Math.floor(spectrogramCanvas.clientWidth * dpr));
+    const targetHeight = Math.max(1, Math.floor(spectrogramCanvas.clientHeight * dpr));
+
+    if (spectrogramCanvas.width !== targetWidth || spectrogramCanvas.height !== targetHeight) {
+        spectrogramCanvas.width = targetWidth;
+        spectrogramCanvas.height = targetHeight;
+    }
+
+    spectrogramWidth = spectrogramCanvas.clientWidth;
+    spectrogramHeight = spectrogramCanvas.clientHeight;
+    drawContext.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+
+function clearSpectrogram() {
+    const drawContext = getSpectrogramContext();
+    if (!drawContext) return;
+
+    resizeSpectrogramCanvasIfNeeded();
+    drawContext.clearRect(0, 0, spectrogramWidth, spectrogramHeight);
+}
+
+function drawSpectrogram(frequencyData, level) {
+    const drawContext = getSpectrogramContext();
+    if (!drawContext || !frequencyData || frequencyData.length === 0) return;
+
+    resizeSpectrogramCanvasIfNeeded();
+    drawContext.clearRect(0, 0, spectrogramWidth, spectrogramHeight);
+
+    const bars = Math.min(SPECTROGRAM_BAR_COUNT, frequencyData.length);
+    const gap = 2;
+    const totalGapWidth = (bars - 1) * gap;
+    const barWidth = Math.max((spectrogramWidth - totalGapWidth) / bars, 2);
+    const baseFloor = spectrogramHeight * 0.14;
+    const dynamicRange = spectrogramHeight * (0.3 + (level * 0.55));
+    const spectrogramRgb = getComputedStyle(ctx.elements.root)
+        .getPropertyValue('--audio-spectrogram-rgb')
+        .trim() || '59, 130, 246';
+
+    let x = 0;
+    for (let index = 0; index < bars; index += 1) {
+        const normalized = frequencyData[index] / 255;
+        const barHeight = baseFloor + (normalized * dynamicRange);
+        const alpha = 0.08 + (normalized * 0.28) + (level * 0.08);
+        const y = spectrogramHeight - barHeight;
+        drawContext.fillStyle = `rgba(${spectrogramRgb}, ${Math.min(alpha, 0.46).toFixed(3)})`;
+        drawContext.fillRect(x, y, barWidth, barHeight);
+        x += barWidth + gap;
+    }
+}
+
+function ensureAudioAnalyser() {
+    if (audioAnalyserNode) return true;
+
+    const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContextCtor) return false;
+
+    try {
+        audioContext = audioContext || new AudioContextCtor();
+        audioSourceNode = audioSourceNode || audioContext.createMediaElementSource(audio);
+        audioAnalyserNode = audioAnalyserNode || audioContext.createAnalyser();
+        audioAnalyserNode.fftSize = 256;
+        audioAnalyserNode.smoothingTimeConstant = 0.78;
+        audioSourceNode.connect(audioAnalyserNode);
+        audioAnalyserNode.connect(audioContext.destination);
+        audioFrequencyData = new Uint8Array(audioAnalyserNode.frequencyBinCount);
+        return true;
+    } catch (error) {
+        logWarn('Unable to initialize audio analyser for visual theme sync', { error: error?.message });
+        audioAnalyserNode = null;
+        audioSourceNode = null;
+        return false;
+    }
+}
+
+function stopVisualThemeSyncLoop() {
+    if (visualSyncFrameId !== null) {
+        cancelAnimationFrame(visualSyncFrameId);
+        visualSyncFrameId = null;
+    }
+}
+
+function startVisualThemeSyncLoop() {
+    if (visualSyncFrameId !== null) return;
+
+    const tick = () => {
+        visualSyncFrameId = requestAnimationFrame(tick);
+
+        if (!ctx.state?.visualThemeSync || audio.paused || audio.ended || !audio.src) {
+            resetVisualSyncState();
+            return;
+        }
+
+        if (!ensureAudioAnalyser()) return;
+
+        if (audioContext?.state === 'suspended') {
+            audioContext.resume().catch(() => {
+                // noop
+            });
+        }
+
+        audioAnalyserNode.getByteFrequencyData(audioFrequencyData);
+        let total = 0;
+        for (let index = 0; index < audioFrequencyData.length; index += 1) {
+            total += audioFrequencyData[index];
+        }
+
+        const instantaneousLevel = audioFrequencyData.length > 0
+            ? (total / audioFrequencyData.length) / 255
+            : 0;
+        visualSyncLevel += (instantaneousLevel - visualSyncLevel) * VISUAL_SYNC_SMOOTHING;
+        ctx.elements.root?.style.setProperty('--audio-visual-level', visualSyncLevel.toFixed(4));
+        ctx.elements.body?.classList.add('audio-visual-sync-active');
+        drawSpectrogram(audioFrequencyData, visualSyncLevel);
+    };
+
+    tick();
 }
 
 function setVolume(level) {
@@ -841,6 +1049,20 @@ export function initializePlayer(context) {
         return true;
     };
 
+    ctx.playerAPI.applyVisualThemeSyncSetting = (enabled) => {
+        ctx.state.visualThemeSync = Boolean(enabled);
+
+        if (!ctx.state.visualThemeSync) {
+            stopVisualThemeSyncLoop();
+            resetVisualSyncState();
+            return;
+        }
+
+        if (!audio.paused && audio.src) {
+            startVisualThemeSyncLoop();
+        }
+    };
+
     if (ctx.state.isPlayerInitialized) {
         log('Player already initialized; skipping re-init');
         renderPlaylists();
@@ -853,15 +1075,22 @@ export function initializePlayer(context) {
     audio.addEventListener('play', () => {
         logDebug('Audio play event');
         updatePlayPauseButton(true);
+        if (ctx.state?.visualThemeSync) {
+            startVisualThemeSyncLoop();
+        }
     });
     audio.addEventListener('pause', () => {
         logDebug('Audio pause event');
         updatePlayPauseButton(false);
+        stopVisualThemeSyncLoop();
+        resetVisualSyncState();
     });
     audio.addEventListener('timeupdate', updateUI);
     audio.addEventListener('loadedmetadata', updateUI);
     audio.addEventListener('ended', () => {
         logDebug('Audio ended event');
+        stopVisualThemeSyncLoop();
+        resetVisualSyncState();
         playNext();
     });
     audio.addEventListener('volumechange', () => {
@@ -872,6 +1101,11 @@ export function initializePlayer(context) {
     // --- Event Listeners for UI Controls ---
     playPauseBtn.addEventListener('click', togglePlayPause);
     progressBarContainer.addEventListener('click', seek);
+    progressBarContainer.addEventListener('pointerdown', handleSeekPointerDown);
+    progressBarContainer.addEventListener('pointermove', handleSeekPointerMove);
+    progressBarContainer.addEventListener('pointerup', handleSeekPointerUp);
+    progressBarContainer.addEventListener('pointercancel', clearSeekDragState);
+    progressBarContainer.addEventListener('lostpointercapture', clearSeekDragState);
     volumeSlider.addEventListener('input', (e) => setVolume(e.target.value));
     volumeIconContainer.addEventListener('click', toggleMute);
 

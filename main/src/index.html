@@ -51,7 +51,8 @@
         </div>
 
         <div class="content">
-            
+            <canvas id="audio-spectrogram-overlay" aria-hidden="true"></canvas>
+
             <div id="update-notification" class="update-notification hidden">
                 <p id="update-message"></p>
                 <button id="restart-btn" class="hidden">Restart to Update</button>
@@ -271,6 +272,13 @@
                     <label for="normalizeVolume">Normalize Volume (slower)</label>
                     <label class="toggle-switch">
                         <input type="checkbox" id="normalizeVolume">
+                        <span class="slider round"></span>
+                    </label>
+                </div>
+                <div class="settings-group toggle-switch-container">
+                    <label for="visualThemeSync">Visual Theme Sync</label>
+                    <label class="toggle-switch">
+                        <input type="checkbox" id="visualThemeSync">
                         <span class="slider round"></span>
                     </label>
                 </div>
