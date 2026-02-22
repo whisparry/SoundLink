@@ -17,6 +17,8 @@
     --tab-switch-speed: 0.3s;
     --dropdown-speed: 0.4s;
     --theme-fade-speed: 0.3s;
+    --audio-visual-level: 0;
+    --audio-spectrogram-rgb: 59, 130, 246;
 }
 
 * {

@@ -94,6 +94,34 @@
     flex-direction: column; /* Stack children vertically */
 }
 
+#audio-spectrogram-overlay {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    z-index: 1;
+    opacity: 0;
+    transition: opacity 0.2s ease;
+    mix-blend-mode: soft-light;
+}
+
+body.audio-visual-sync-enabled.audio-visual-sync-active #audio-spectrogram-overlay {
+    opacity: 1;
+}
+
+body.audio-visual-sync-enabled .container {
+    transition: box-shadow 120ms linear;
+}
+
+body.audio-visual-sync-enabled.audio-visual-sync-active .container {
+    box-shadow: inset 0 0 calc(20px + (140px * var(--audio-visual-level))) var(--accent-primary);
+}
+
+body.audio-visual-sync-enabled.audio-visual-sync-active #now-playing {
+    letter-spacing: calc(var(--audio-visual-level) * 0.4px);
+}
+
 @keyframes viewFadeIn {
     from { opacity: 0; }
     to { opacity: 1; }
@@ -106,6 +134,8 @@
     box-sizing: border-box; /* Include padding in height calculation. */
     overflow-y: auto;
     flex-direction: column; /* Default direction for views */
+    position: relative;
+    z-index: 2;
 }
 
 .view.active-view {
