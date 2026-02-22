@@ -1114,6 +1114,11 @@ body.hide-mix-buttons .player-playlists-panel .playlist-add-btn {
     color: var(--accent-text-color);
 }
 
+.player-track-item.playing .track-tag-badge {
+    background-color: var(--accent-text-color);
+    color: var(--accent-primary);
+}
+
 .pm-track-name {
     flex-grow: 1;
     white-space: nowrap;
