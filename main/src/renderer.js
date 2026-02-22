@@ -292,6 +292,7 @@ window.addEventListener('DOMContentLoaded', () => {
         confirmText = 'Confirm',
         cancelText = 'Cancel',
         danger = false,
+        hideCancel = false,
         prompt = false,
         initialValue = '',
         placeholder = '',
@@ -308,6 +309,7 @@ window.addEventListener('DOMContentLoaded', () => {
             appDialogConfirmBtn.textContent = confirmText;
             appDialogCancelBtn.textContent = cancelText;
             appDialogConfirmBtn.classList.toggle('danger', danger);
+            appDialogCancelBtn.classList.toggle('hidden', hideCancel);
 
             if (prompt) {
                 appDialogInput.classList.remove('hidden');
@@ -328,6 +330,7 @@ window.addEventListener('DOMContentLoaded', () => {
                 appDialogCancelBtn.removeEventListener('click', onCancel);
                 appDialogModal.removeEventListener('click', onOverlayClick);
                 appDialogInput.removeEventListener('keydown', onInputKeydown);
+                appDialogCancelBtn.classList.remove('hidden');
             };
 
             const onConfirm = () => {
@@ -366,6 +369,14 @@ window.addEventListener('DOMContentLoaded', () => {
 
     const showConfirmDialog = (title, message, options = {}) => showCustomDialog({ title, message, ...options, prompt: false });
     const showPromptDialog = (title, message, initialValue = '', options = {}) => showCustomDialog({ title, message, initialValue, ...options, prompt: true });
+    const showInfoDialog = (title, message, options = {}) => showCustomDialog({
+        title,
+        message,
+        ...options,
+        prompt: false,
+        hideCancel: true,
+        confirmText: options.confirmText || 'Close',
+    });
 
     const saveSettings = async () => {
         const newSettings = {
@@ -531,7 +542,7 @@ window.addEventListener('DOMContentLoaded', () => {
             playerTracksStats: document.getElementById('player-tracks-stats'),
         },
         state: state,
-        helpers: { showLoader, hideLoader, saveSettings, showView, showContextMenu, hideContextMenu },
+        helpers: { showLoader, hideLoader, saveSettings, showView, showContextMenu, hideContextMenu, showInfoDialog },
         playerAPI: {},
         pmAPI: {},
     };

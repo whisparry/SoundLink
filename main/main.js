@@ -50,6 +50,7 @@ const trayIconPath = path.join(assetsPath, 'icon.png');
 const configPath = path.join(app.getPath('userData'), 'config.json');
 const statsPath = path.join(app.getPath('userData'), 'stats.json');
 const cachePath = path.join(app.getPath('userData'), 'link_cache.json');
+const trackTagsPath = path.join(app.getPath('userData'), 'track_tags.json');
 const undoTrashPath = path.join(app.getPath('userData'), 'undo-trash');
 const trimUndoManifestPath = path.join(app.getPath('userData'), 'trim-undo-manifests');
 const ytdlpDir = isDev ? path.join(__dirname, 'yt-dlp') : path.join(process.resourcesPath, 'yt-dlp');
@@ -60,6 +61,7 @@ const ytdlpGetPotPluginDir = path.join(userDataPluginRoot, 'yt-dlp-get-pot');
 let config = {};
 let stats = {};
 let linkCache = {};
+let trackTags = {};
 let downloadsDir = path.join(app.getPath('downloads'), 'SoundLink');
 let mainWindow;
 let tray = null;
@@ -587,6 +589,7 @@ writeLog('info', 'Main', 'App bootstrap started', { isDev, currentLogLevel });
 loadConfig();
 loadStats();
 loadCache();
+loadTrackTags();
 findYtdlpExecutables();
 if (!fs.existsSync(downloadsDir)) {
     fs.mkdirSync(downloadsDir, { recursive: true });
@@ -887,6 +890,85 @@ app.whenReady().then(() => {
         }
     });
 
+    ipcMain.handle('open-track-file', async (_event, filePath) => {
+        try {
+            if (!filePath || !fs.existsSync(filePath)) {
+                return { success: false, error: 'File does not exist.' };
+            }
+            const errorMessage = await shell.openPath(filePath);
+            if (errorMessage) {
+                return { success: false, error: errorMessage };
+            }
+            return { success: true };
+        } catch (error) {
+            return { success: false, error: error.message };
+        }
+    });
+
+    ipcMain.handle('get-track-tags', async (_event, filePath) => {
+        return { success: true, tags: getTrackTagsForPath(filePath) };
+    });
+
+    ipcMain.handle('add-track-tag', async (_event, { filePath, tag }) => {
+        try {
+            if (!filePath || typeof filePath !== 'string') {
+                return { success: false, error: 'Invalid track path.' };
+            }
+
+            const normalizedTag = typeof tag === 'string' ? tag.trim() : '';
+            if (!normalizedTag) {
+                return { success: false, error: 'Tag cannot be empty.' };
+            }
+
+            const existing = getTrackTagsForPath(filePath);
+            existing.push(normalizedTag);
+            setTrackTagsForPath(filePath, existing);
+            saveTrackTags();
+
+            return { success: true, tags: getTrackTagsForPath(filePath) };
+        } catch (error) {
+            return { success: false, error: error.message };
+        }
+    });
+
+    ipcMain.handle('get-track-details', async (_event, filePath) => {
+        try {
+            if (!filePath || !fs.existsSync(filePath)) {
+                return { success: false, error: 'Track file does not exist.' };
+            }
+
+            const fileStat = await fs.promises.stat(filePath);
+            let metadata = null;
+            try {
+                metadata = await mm.parseFile(filePath, { duration: true, skipCovers: true });
+            } catch {
+                metadata = null;
+            }
+
+            const bitrate = metadata?.format?.bitrate;
+            const details = {
+                path: filePath,
+                fileName: path.basename(filePath),
+                title: path.parse(filePath).name,
+                extension: path.extname(filePath).replace('.', '').toLowerCase(),
+                directory: path.dirname(filePath),
+                playlistName: path.basename(path.dirname(filePath)),
+                sizeBytes: fileStat.size,
+                sizeFormatted: formatBytes(fileStat.size),
+                dateDownloaded: (fileStat.birthtime || fileStat.ctime || fileStat.mtime)?.toISOString?.() || null,
+                modifiedAt: fileStat.mtime?.toISOString?.() || null,
+                durationSeconds: Number.isFinite(metadata?.format?.duration) ? metadata.format.duration : null,
+                bitrateKbps: Number.isFinite(bitrate) ? Math.round(bitrate / 1000) : null,
+                source: inferTrackSource(filePath, metadata),
+                tags: getTrackTagsForPath(filePath),
+            };
+
+            return { success: true, details };
+        } catch (error) {
+            return { success: false, error: error.message };
+        }
+    });
+
     ipcMain.handle('update-ytdlp', async () => {
         const candidates = fs.existsSync(ytdlpDir)
             ? fs.readdirSync(ytdlpDir)
@@ -1120,6 +1202,7 @@ app.whenReady().then(() => {
             const fileName = path.basename(sourcePath);
             const destinationPath = path.join(destinationPlaylistPath, fileName);
             await fs.promises.rename(sourcePath, destinationPath);
+            moveTrackTagsPath(sourcePath, destinationPath);
             return { success: true };
         } catch (error) {
             console.error(`Failed to move track from ${sourcePath} to ${destinationPlaylistPath}`, error);
@@ -1253,6 +1336,7 @@ app.whenReady().then(() => {
                 }
 
                 await fs.promises.rename(currentPath, targetPath);
+                moveTrackTagsPath(currentPath, targetPath);
                 return { success: true, restoredPath: targetPath };
             }
 
@@ -1319,6 +1403,7 @@ app.whenReady().then(() => {
             }
 
             await fs.promises.rename(oldPath, newPath);
+            moveTrackTagsPath(oldPath, newPath);
             return { success: true, newPath };
         } catch (error) {
             console.error(`Failed to rename track from ${oldPath} to ${newName}`, error);
@@ -2567,4 +2652,96 @@ async function restoreFromUndoTrash(trashPath, originalPath) {
         }
     }
     return { success: true, restoredPath: originalPath };
+}
+
+function loadTrackTags() {
+    try {
+        if (fs.existsSync(trackTagsPath)) {
+            const parsed = JSON.parse(fs.readFileSync(trackTagsPath, 'utf-8'));
+            trackTags = parsed && typeof parsed === 'object' ? parsed : {};
+        } else {
+            trackTags = {};
+            fs.writeFileSync(trackTagsPath, JSON.stringify(trackTags, null, 4));
+        }
+    } catch (error) {
+        console.error('Failed to load or create track tags file:', error);
+        trackTags = {};
+    }
+}
+
+function saveTrackTags() {
+    try {
+        safeWriteFileSync(trackTagsPath, JSON.stringify(trackTags, null, 4));
+    } catch (error) {
+        console.error('Failed to save track tags file:', error);
+    }
+}
+
+function normalizeTagList(tags) {
+    if (!Array.isArray(tags)) return [];
+
+    const seen = new Set();
+    const normalized = [];
+    for (const rawTag of tags) {
+        if (typeof rawTag !== 'string') continue;
+        const trimmed = rawTag.trim();
+        if (!trimmed) continue;
+        const key = trimmed.toLowerCase();
+        if (seen.has(key)) continue;
+        seen.add(key);
+        normalized.push(trimmed);
+    }
+    return normalized;
+}
+
+function getTrackTagsForPath(filePath) {
+    if (!filePath || typeof filePath !== 'string') return [];
+    return normalizeTagList(trackTags[filePath]);
+}
+
+function setTrackTagsForPath(filePath, tags) {
+    if (!filePath || typeof filePath !== 'string') return;
+    const normalized = normalizeTagList(tags);
+    if (normalized.length === 0) {
+        delete trackTags[filePath];
+    } else {
+        trackTags[filePath] = normalized;
+    }
+}
+
+function moveTrackTagsPath(fromPath, toPath) {
+    if (!fromPath || !toPath || fromPath === toPath) return;
+    const tags = getTrackTagsForPath(fromPath);
+    if (tags.length === 0) return;
+    setTrackTagsForPath(toPath, tags);
+    delete trackTags[fromPath];
+    saveTrackTags();
+}
+
+function inferTrackSource(filePath, metadata) {
+    const hints = [
+        filePath,
+        metadata?.common?.comment,
+        metadata?.common?.description,
+        metadata?.common?.publisher,
+    ]
+        .flat()
+        .filter(Boolean)
+        .map(value => String(value).toLowerCase())
+        .join(' ');
+
+    if (hints.includes('spotify')) return 'Spotify';
+    if (hints.includes('youtube') || hints.includes('youtu.be') || hints.includes('ytmusic')) return 'YouTube';
+    if (hints.includes('soundcloud')) return 'SoundCloud';
+    if (hints.includes('apple music') || hints.includes('music.apple.com')) return 'Apple Music';
+    return 'Unknown';
+}
+
+function formatBytes(bytes) {
+    if (!Number.isFinite(bytes) || bytes < 0) return 'Unknown';
+    if (bytes === 0) return '0 B';
+    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+    const exponent = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
+    const value = bytes / (1024 ** exponent);
+    return `${value.toFixed(value >= 100 || exponent === 0 ? 0 : 1)} ${units[exponent]}`;
 }

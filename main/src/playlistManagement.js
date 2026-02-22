@@ -26,6 +26,77 @@ const log = (message, data) => emitLog('info', message, data);
 const logWarn = (message, data) => emitLog('warn', message, data);
 const logError = (message, data) => emitLog('error', message, data);
 
+function formatTrackDetailsDate(value) {
+    if (!value) return 'Unknown';
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) return 'Unknown';
+    return parsed.toLocaleString();
+}
+
+function formatTrackDetailsDuration(durationSeconds) {
+    if (!Number.isFinite(durationSeconds) || durationSeconds <= 0) return 'Unknown';
+    const rounded = Math.round(durationSeconds);
+    const hours = Math.floor(rounded / 3600);
+    const minutes = Math.floor((rounded % 3600) / 60);
+    const seconds = rounded % 60;
+    if (hours > 0) {
+        return `${hours}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+    }
+    return `${minutes}:${String(seconds).padStart(2, '0')}`;
+}
+
+function buildTrackDetailsMessage(details) {
+    const tagText = Array.isArray(details.tags) && details.tags.length > 0 ? details.tags.join(', ') : 'None';
+    return [
+        `Title: ${details.title || details.fileName || 'Unknown'}`,
+        `Source: ${details.source || 'Unknown'}`,
+        `Date downloaded: ${formatTrackDetailsDate(details.dateDownloaded)}`,
+        `Duration: ${formatTrackDetailsDuration(details.durationSeconds)}`,
+        `Bitrate: ${Number.isFinite(details.bitrateKbps) ? `${details.bitrateKbps} kbps` : 'Unknown'}`,
+        `Size: ${details.sizeFormatted || 'Unknown'}`,
+        `Tags: ${tagText}`,
+        '',
+        `File path: ${details.path || 'Unknown'}`,
+    ].join('\n');
+}
+
+async function showTrackInfoFromContext(track) {
+    const result = await window.electronAPI.getTrackDetails(track.path);
+    if (!result?.success || !result.details) {
+        ctx.helpers.showNotification('error', 'More Info Failed', result?.error || 'Could not load track details.');
+        return;
+    }
+
+    await ctx.helpers.showInfoDialog('Track Details', buildTrackDetailsMessage(result.details), { confirmText: 'Close' });
+}
+
+async function addTagToTrackFromContext(track) {
+    const tagInput = await ctx.helpers.showPromptDialog(
+        'Add Tag',
+        `Add a tag for "${track.name}"`,
+        '',
+        { confirmText: 'Add Tag', cancelText: 'Cancel', placeholder: 'e.g. workout, chill, favorite' }
+    );
+
+    const trimmedTag = tagInput?.trim();
+    if (!trimmedTag) return;
+
+    const result = await window.electronAPI.addTrackTag({ filePath: track.path, tag: trimmedTag });
+    if (!result?.success) {
+        ctx.helpers.showNotification('error', 'Add Tag Failed', result?.error || 'Could not add tag.');
+        return;
+    }
+
+    ctx.helpers.showNotification('success', 'Tag Added', `"${trimmedTag}" added to "${track.name}".`);
+}
+
+async function goToTrackFileFromContext(track) {
+    const result = await window.electronAPI.openTrackFile(track.path);
+    if (!result?.success) {
+        ctx.helpers.showNotification('error', 'Go to File Failed', result?.error || 'Could not open track file.');
+    }
+}
+
 async function pmRenderTracks(playlistPath) {
     const { pmTracksContainer, pmTrackSearchInput, moveTrackNameEl, moveTrackDestinationSelect, moveTrackModal } = ctx.elements;
     log('Rendering tracks', { playlistPath });
@@ -58,6 +129,19 @@ async function pmRenderTracks(playlistPath) {
                 e.preventDefault();
                 const menuItems = [
                     {
+                        label: 'More info',
+                        action: () => { void showTrackInfoFromContext(track); }
+                    },
+                    {
+                        label: 'Add tag',
+                        action: () => { void addTagToTrackFromContext(track); }
+                    },
+                    {
+                        label: 'Go to file',
+                        action: () => { void goToTrackFileFromContext(track); }
+                    },
+                    { type: 'separator' },
+                    {
                         label: 'Rename',
                         action: () => trackNameSpan.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }))
                     },
@@ -66,12 +150,12 @@ async function pmRenderTracks(playlistPath) {
                         action: () => moveButton.click()
                     },
                     {
-                        label: 'Delete',
+                        label: 'Remove from library',
                         action: () => deleteButton.click()
                     },
                     { type: 'separator' },
                     {
-                        label: 'Show in Folder',
+                        label: 'Show in folder',
                         action: () => window.electronAPI.showInExplorer(track.path)
                     }
                 ];

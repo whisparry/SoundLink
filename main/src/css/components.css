@@ -297,6 +297,7 @@ button:hover {
 
 #app-dialog-message {
     margin: 8px 0 14px;
+    white-space: pre-line;
 }
 
 #app-dialog-input {
