@@ -285,6 +285,10 @@
                     <label for="durationToleranceSeconds">Duration Tolerance (seconds)</label>
                     <input type="number" id="durationToleranceSeconds" placeholder="0-120" min="0" max="120">
                 </div>
+                <div class="settings-group">
+                    <label for="silenceTrimThresholdDb">Silence Trim Threshold (dB)</label>
+                    <input type="number" id="silenceTrimThresholdDb" placeholder="10-80" min="10" max="80">
+                </div>
                  
                 <div class="settings-category">
                     <div class="category-header" id="animations-category-header">
@@ -307,6 +311,7 @@
                     </div>
                 </div>
                 <div class="settings-group advanced-actions-container">
+                    <button id="trim-library-silence-btn" class="secondary-btn">Trim Start/End Silence in Library</button>
                     <button id="update-ytdlp-btn">Update yt-dlp</button>
                     <button id="check-for-updates-btn">Check for App Updates</button>
                     <button id="clear-cache-btn" class="secondary-btn">Clear Link Cache</button>

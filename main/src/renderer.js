@@ -99,9 +99,11 @@ window.addEventListener('DOMContentLoaded', () => {
     const hideMixButtonsInput = document.getElementById('hideMixButtons');
     const skipManualLinkPromptInput = document.getElementById('skipManualLinkPrompt');
     const durationToleranceSecondsInput = document.getElementById('durationToleranceSeconds');
+    const silenceTrimThresholdDbInput = document.getElementById('silenceTrimThresholdDb');
     const updateYtdlpBtn = document.getElementById('update-ytdlp-btn');
     const checkForUpdatesBtn = document.getElementById('check-for-updates-btn');
     const clearCacheBtn = document.getElementById('clear-cache-btn');
+    const trimLibrarySilenceBtn = document.getElementById('trim-library-silence-btn');
     const spotifyLink = document.getElementById('spotify-link');
     const spotifySearchInput = document.getElementById('spotify-search-input');
     const spotifyResultsDropdown = document.getElementById('spotify-results-dropdown');
@@ -172,6 +174,8 @@ window.addEventListener('DOMContentLoaded', () => {
         spotifySearchDebounce: null,
         spotifySearchType: 'playlist',
         spotifyPreviewTracks: [],
+        activeSilenceTrimJobId: null,
+        lastSilenceTrimProgressTick: 0,
     };
 
     // --- Helper Functions ---
@@ -380,6 +384,7 @@ window.addEventListener('DOMContentLoaded', () => {
             hideMixButtons: hideMixButtonsInput.checked,
             skipManualLinkPrompt: skipManualLinkPromptInput.checked,
             durationToleranceSeconds: parseInt(durationToleranceSecondsInput.value, 10),
+            silenceTrimThresholdDb: parseInt(silenceTrimThresholdDbInput.value, 10),
         };
         await window.electronAPI.saveSettings(newSettings);
     };
@@ -812,24 +817,30 @@ window.addEventListener('DOMContentLoaded', () => {
 
     // --- Toast Notification Logic ---
     function showNotification(type, title, message, options = {}) {
-        window.electronAPI.incrementNotificationStat();
-        const timestamp = new Date().toISOString();
-        const notification = {
-            id: `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
-            type,
-            title,
-            message,
-            timestamp,
-            undoAction: options.undoAction || null,
-            undone: false,
-        };
-        state.notificationHistory.unshift(notification);
-        if (state.notificationHistory.length > 100) state.notificationHistory.pop();
-        saveNotificationHistory();
-        if (notificationHistoryView.classList.contains('active-view')) renderNotificationHistory();
+        const shouldRecordHistory = options.recordHistory !== false;
+
+        if (shouldRecordHistory) {
+            window.electronAPI.incrementNotificationStat();
+            const timestamp = new Date().toISOString();
+            const notification = {
+                id: `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
+                type,
+                title,
+                message,
+                timestamp,
+                undoAction: options.undoAction || null,
+                undone: false,
+            };
+            state.notificationHistory.unshift(notification);
+            if (state.notificationHistory.length > 100) state.notificationHistory.pop();
+            saveNotificationHistory();
+            if (notificationHistoryView.classList.contains('active-view')) renderNotificationHistory();
+            state.activeToastNotificationId = notification.id;
+        } else {
+            state.activeToastNotificationId = null;
+        }
 
         if (state.toastTimer) clearTimeout(state.toastTimer);
-        state.activeToastNotificationId = notification.id;
         toastTitle.textContent = title;
         toastMessage.textContent = message;
         toastNotification.className = `toast-notification ${type}`;
@@ -964,9 +975,10 @@ window.addEventListener('DOMContentLoaded', () => {
             normalizeVolumeInput.checked = currentConfig.normalizeVolume || false;
             skipManualLinkPromptInput.checked = currentConfig.skipManualLinkPrompt || false;
             durationToleranceSecondsInput.value = currentConfig.durationToleranceSeconds || 20;
+            silenceTrimThresholdDbInput.value = currentConfig.silenceTrimThresholdDb || 35;
             spotifySearchLimitInput.value = currentConfig.spotifySearchLimit || 10;
         }
-        [fileExtensionInput, downloadThreadsInput, clientIdInput, clientSecretInput, tabSpeedSlider, dropdownSpeedSlider, themeFadeSlider, autoCreatePlaylistInput, hideRefreshButtonsInput, hidePlaylistCountsInput, hideTrackNumbersInput, normalizeVolumeInput, hideSearchBarsInput, hideMixButtonsInput, spotifySearchLimitInput, skipManualLinkPromptInput, durationToleranceSecondsInput].forEach(input => input.addEventListener('change', saveSettings));
+        [fileExtensionInput, downloadThreadsInput, clientIdInput, clientSecretInput, tabSpeedSlider, dropdownSpeedSlider, themeFadeSlider, autoCreatePlaylistInput, hideRefreshButtonsInput, hidePlaylistCountsInput, hideTrackNumbersInput, normalizeVolumeInput, hideSearchBarsInput, hideMixButtonsInput, spotifySearchLimitInput, skipManualLinkPromptInput, durationToleranceSecondsInput, silenceTrimThresholdDbInput].forEach(input => input.addEventListener('change', saveSettings));
         hideRefreshButtonsInput.addEventListener('change', () => body.classList.toggle('hide-refresh-buttons', hideRefreshButtonsInput.checked));
         hidePlaylistCountsInput.addEventListener('change', () => body.classList.toggle('hide-playlist-counts', hidePlaylistCountsInput.checked));
         hideTrackNumbersInput.addEventListener('change', () => body.classList.toggle('hide-track-numbers', hideTrackNumbersInput.checked));
@@ -992,6 +1004,13 @@ window.addEventListener('DOMContentLoaded', () => {
             if (isNaN(value)) return;
             if (value > max) durationToleranceSecondsInput.value = max;
             else if (value < min && durationToleranceSecondsInput.value !== '') durationToleranceSecondsInput.value = min;
+        });
+        silenceTrimThresholdDbInput.addEventListener('input', () => {
+            const max = parseInt(silenceTrimThresholdDbInput.max, 10), min = parseInt(silenceTrimThresholdDbInput.min, 10);
+            let value = parseInt(silenceTrimThresholdDbInput.value, 10);
+            if (isNaN(value)) return;
+            if (value > max) silenceTrimThresholdDbInput.value = max;
+            else if (value < min && silenceTrimThresholdDbInput.value !== '') silenceTrimThresholdDbInput.value = min;
         });
         populateThemeGrid();
     };
@@ -1262,6 +1281,7 @@ window.addEventListener('DOMContentLoaded', () => {
         setToggle(hideMixButtonsInput, 'hide-mix-buttons', defaultSettings.hideMixButtons || false);
         skipManualLinkPromptInput.checked = defaultSettings.skipManualLinkPrompt || false;
         durationToleranceSecondsInput.value = defaultSettings.durationToleranceSeconds || 20;
+        silenceTrimThresholdDbInput.value = defaultSettings.silenceTrimThresholdDb || 35;
         const setSlider = (slider, valueEl, prop, value) => {
             slider.value = value;
             valueEl.textContent = `${value}s`;
@@ -1273,6 +1293,88 @@ window.addEventListener('DOMContentLoaded', () => {
         populateThemeGrid();
         saveSettings();
         showNotification('success', 'Settings Reset', 'All settings have been restored to their defaults.');
+    });
+
+    trimLibrarySilenceBtn.addEventListener('click', async () => {
+        const thresholdDb = Number.parseInt(silenceTrimThresholdDbInput.value, 10);
+        const safeThresholdDb = Number.isFinite(thresholdDb) ? thresholdDb : 35;
+        const confirmed = await showConfirmDialog(
+            'Trim Silence from Library',
+            `This will scan all tracks in your library and trim leading/trailing silence below -${safeThresholdDb}dB. This can be undone once from notifications. Continue?`,
+            { confirmText: 'Trim Library', cancelText: 'Cancel', danger: true }
+        );
+
+        if (!confirmed) return;
+
+        trimLibrarySilenceBtn.disabled = true;
+        try {
+            const startResult = await window.electronAPI.startTrimLibrarySilence({ thresholdDb: safeThresholdDb });
+            if (!startResult?.success || !startResult?.started) {
+                trimLibrarySilenceBtn.disabled = false;
+                showNotification('error', 'Trim Not Started', startResult?.error || 'Failed to start trim task.');
+                return;
+            }
+
+            state.activeSilenceTrimJobId = startResult.jobId;
+            state.lastSilenceTrimProgressTick = 0;
+            showNotification('info', 'Silence Trim Started', 'Running in background. You can continue using the app.', { recordHistory: false });
+        } catch (error) {
+            trimLibrarySilenceBtn.disabled = false;
+            showNotification('error', 'Trim Failed', error?.message || 'Failed to trim library tracks.');
+        }
+    });
+
+    window.electronAPI.onTrimLibrarySilenceProgress(async (payload = {}) => {
+        if (!payload?.jobId || payload.jobId !== state.activeSilenceTrimJobId) return;
+
+        const status = payload.status;
+        if (status === 'started') {
+            const totalCount = payload.totalCount || 0;
+            const thresholdDb = payload.thresholdDb || 35;
+            showNotification('info', 'Silence Trim Running', `Scanning ${totalCount} track(s) at -${thresholdDb}dB threshold.`, { recordHistory: false });
+            return;
+        }
+
+        if (status === 'progress') {
+            const processed = payload.processedCount || 0;
+            const total = payload.totalCount || 0;
+            const shouldNotify = processed === total || (processed - state.lastSilenceTrimProgressTick) >= 20;
+            if (!shouldNotify) return;
+
+            state.lastSilenceTrimProgressTick = processed;
+            showNotification(
+                'info',
+                'Silence Trim Progress',
+                `${processed}/${total} scanned • ${payload.modifiedCount || 0} trimmed • ${payload.failedCount || 0} failed`,
+                { recordHistory: false }
+            );
+            return;
+        }
+
+        if (status === 'completed') {
+            trimLibrarySilenceBtn.disabled = false;
+            state.activeSilenceTrimJobId = null;
+            state.lastSilenceTrimProgressTick = 0;
+
+            if ((payload.modifiedCount || 0) > 0) {
+                const message = payload.failedCount > 0
+                    ? `Trimmed ${payload.modifiedCount} track(s). ${payload.failedCount} failed.`
+                    : `Trimmed ${payload.modifiedCount} track(s) successfully.`;
+                showNotification('success', 'Silence Trim Complete', message, { undoAction: payload.undoAction || null });
+            } else {
+                showNotification('info', 'No Trim Needed', 'No leading or trailing silence met the configured threshold.');
+            }
+
+            await refreshAfterUndo();
+            return;
+        }
+
+        if (status === 'error') {
+            trimLibrarySilenceBtn.disabled = false;
+            state.activeSilenceTrimJobId = null;
+            state.lastSilenceTrimProgressTick = 0;
+            showNotification('error', 'Trim Failed', payload.error || 'Background trim task failed.');
+        }
     });
 
     // --- Stats Logic ---

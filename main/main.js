@@ -51,6 +51,7 @@ const configPath = path.join(app.getPath('userData'), 'config.json');
 const statsPath = path.join(app.getPath('userData'), 'stats.json');
 const cachePath = path.join(app.getPath('userData'), 'link_cache.json');
 const undoTrashPath = path.join(app.getPath('userData'), 'undo-trash');
+const trimUndoManifestPath = path.join(app.getPath('userData'), 'trim-undo-manifests');
 const ytdlpDir = isDev ? path.join(__dirname, 'yt-dlp') : path.join(process.resourcesPath, 'yt-dlp');
 const userDataPluginRoot = path.join(app.getPath('userData'), 'yt-dlp-plugins');
 const ytdlpGetPotPluginDir = path.join(userDataPluginRoot, 'yt-dlp-get-pot');
@@ -74,6 +75,7 @@ let cachedYtdlpPluginFlag = undefined;
 let cachedNodeRuntimePath = undefined;
 let manualLinkRequestCounter = 0;
 const pendingManualLinkRequests = new Map();
+const activeSilenceTrimJobs = new Map();
 
 const DEFAULT_DOWNLOAD_TIMING_STATS = {
     trackSamples: 0,
@@ -208,6 +210,9 @@ function loadConfig() {
         if (fs.existsSync(configPath)) {
             config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
             downloadsDir = config.downloadsPath || downloadsDir;
+            if (!Number.isFinite(Number.parseInt(config.silenceTrimThresholdDb, 10))) {
+                config.silenceTrimThresholdDb = 35;
+            }
         } else {
             config = { 
                 theme: 'dark',
@@ -227,6 +232,7 @@ function loadConfig() {
                 hideMixButtons: false,
                 skipManualLinkPrompt: false,
                 durationToleranceSeconds: 20,
+                silenceTrimThresholdDb: 35,
                 playlistsFolderPath: ''
             };
             fs.writeFileSync(configPath, JSON.stringify(config, null, 4));
@@ -819,6 +825,7 @@ app.whenReady().then(() => {
             hideMixButtons: false,
             skipManualLinkPrompt: false,
             durationToleranceSeconds: 20,
+            silenceTrimThresholdDb: 35,
         };
     });
 
@@ -925,6 +932,119 @@ app.whenReady().then(() => {
         } catch (error) {
             console.error('Error calculating library stats:', error);
             return stats; // Return default stats on error
+        }
+    });
+
+    ipcMain.handle('start-trim-library-silence', async (_event, options = {}) => {
+        try {
+            if (activeSilenceTrimJobs.size > 0) {
+                return { success: false, error: 'A silence trim task is already running.' };
+            }
+
+            const playlistsPath = config.playlistsFolderPath;
+            if (!playlistsPath || !fs.existsSync(playlistsPath)) {
+                return { success: false, error: 'Playlists folder is not set or does not exist.' };
+            }
+
+            const thresholdRaw = Number.parseInt(options.thresholdDb, 10);
+            const fallbackThreshold = Number.parseInt(config.silenceTrimThresholdDb, 10);
+            const thresholdDb = Number.isFinite(thresholdRaw)
+                ? Math.min(80, Math.max(10, thresholdRaw))
+                : (Number.isFinite(fallbackThreshold) ? Math.min(80, Math.max(10, fallbackThreshold)) : 35);
+
+            const jobId = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+            activeSilenceTrimJobs.set(jobId, {
+                startedAt: Date.now(),
+                thresholdDb,
+            });
+
+            setTimeout(async () => {
+                const sendProgress = (payload) => {
+                    if (mainWindow && !mainWindow.isDestroyed()) {
+                        mainWindow.webContents.send('trim-library-silence-progress', { jobId, ...payload });
+                    }
+                };
+
+                try {
+                    const playlistFolders = await fs.promises.readdir(playlistsPath, { withFileTypes: true });
+                    const directories = playlistFolders.filter(entry => entry.isDirectory());
+                    const trackPaths = [];
+
+                    for (const folder of directories) {
+                        const playlistFolderPath = path.join(playlistsPath, folder.name);
+                        const files = await fs.promises.readdir(playlistFolderPath);
+                        for (const file of files) {
+                            if (supportedExtensions.includes(path.extname(file).toLowerCase())) {
+                                trackPaths.push(path.join(playlistFolderPath, file));
+                            }
+                        }
+                    }
+
+                    const totalCount = trackPaths.length;
+                    const backups = [];
+                    const failures = [];
+                    let processedCount = 0;
+
+                    sendProgress({
+                        status: 'started',
+                        thresholdDb,
+                        totalCount,
+                    });
+
+                    for (const trackPath of trackPaths) {
+                        try {
+                            const trimResult = await trimTrackSilenceInPlace(trackPath, thresholdDb);
+                            if (trimResult.modified && trimResult.backup) {
+                                backups.push(trimResult.backup);
+                            }
+                        } catch (error) {
+                            failures.push({ path: trackPath, error: error.message });
+                        }
+
+                        processedCount += 1;
+                        if (processedCount === totalCount || processedCount === 1 || processedCount % 10 === 0) {
+                            sendProgress({
+                                status: 'progress',
+                                processedCount,
+                                totalCount,
+                                modifiedCount: backups.length,
+                                failedCount: failures.length,
+                            });
+                        }
+                    }
+
+                    let undoAction = null;
+                    if (backups.length > 0) {
+                        const manifestId = await saveTrimUndoManifest(backups);
+                        undoAction = {
+                            type: 'trim-library-silence-batch',
+                            payload: { manifestId },
+                        };
+                    }
+
+                    sendProgress({
+                        status: 'completed',
+                        scannedCount: totalCount,
+                        modifiedCount: backups.length,
+                        failedCount: failures.length,
+                        failures,
+                        undoAction,
+                    });
+                } catch (error) {
+                    console.error('Failed to trim library silence in background:', error);
+                    sendProgress({
+                        status: 'error',
+                        error: error.message,
+                    });
+                } finally {
+                    activeSilenceTrimJobs.delete(jobId);
+                }
+            }, 0);
+
+            return { success: true, started: true, jobId, thresholdDb };
+        } catch (error) {
+            console.error('Failed to start background trim task:', error);
+            return { success: false, error: error.message };
         }
     });
 
@@ -1098,6 +1218,47 @@ app.whenReady().then(() => {
 
                 await fs.promises.rename(currentPath, targetPath);
                 return { success: true, restoredPath: targetPath };
+            }
+
+            if (action.type === 'trim-library-silence-batch') {
+                const manifestId = payload.manifestId;
+                const manifestData = await readTrimUndoManifest(manifestId);
+                if (!manifestData || !Array.isArray(manifestData.items) || manifestData.items.length === 0) {
+                    return { success: false, error: 'Undo manifest for silence trim is missing or empty.' };
+                }
+
+                const failedItems = [];
+                let restoredCount = 0;
+
+                for (const item of manifestData.items) {
+                    try {
+                        if (item.originalPath && fs.existsSync(item.originalPath)) {
+                            await moveToUndoTrash(item.originalPath);
+                        }
+                        const restored = await restoreFromUndoTrash(item.trashPath, item.originalPath);
+                        if (!restored.success) {
+                            failedItems.push(item);
+                            continue;
+                        }
+                        restoredCount += 1;
+                    } catch {
+                        failedItems.push(item);
+                    }
+                }
+
+                if (failedItems.length > 0) {
+                    await writeTrimUndoManifest(manifestId, { createdAt: manifestData.createdAt, items: failedItems });
+                    return {
+                        success: restoredCount > 0,
+                        restoredCount,
+                        error: restoredCount > 0
+                            ? `Restored ${restoredCount} track(s), but ${failedItems.length} could not be restored.`
+                            : `Unable to restore ${failedItems.length} track(s).`,
+                    };
+                }
+
+                await deleteTrimUndoManifest(manifestId);
+                return { success: true, restoredCount };
             }
 
             return { success: false, error: `Unsupported undo action type: ${action.type}` };
@@ -2071,6 +2232,248 @@ app.on('window-all-closed', () => {
 
 async function ensureUndoTrashExists() {
     await fs.promises.mkdir(undoTrashPath, { recursive: true });
+}
+
+function getMediaToolPath(toolName) {
+    const executableName = process.platform === 'win32' ? `${toolName}.exe` : toolName;
+    const bundledPath = path.join(ytdlpDir, executableName);
+    if (fs.existsSync(bundledPath)) {
+        return bundledPath;
+    }
+    return executableName;
+}
+
+function runMediaTool(executablePath, args, { stdinNull = false } = {}) {
+    return new Promise((resolve, reject) => {
+        const proc = spawn(executablePath, args, {
+            windowsHide: true,
+            stdio: stdinNull ? ['ignore', 'pipe', 'pipe'] : ['pipe', 'pipe', 'pipe'],
+        });
+
+        let stdout = '';
+        let stderr = '';
+
+        proc.stdout.on('data', (data) => {
+            stdout += data.toString();
+        });
+        proc.stderr.on('data', (data) => {
+            stderr += data.toString();
+        });
+        proc.on('error', reject);
+        proc.on('close', (code) => {
+            resolve({ code, stdout, stderr });
+        });
+    });
+}
+
+async function getTrackDurationSeconds(filePath) {
+    const ffprobePath = getMediaToolPath('ffprobe');
+    const args = [
+        '-v', 'error',
+        '-show_entries', 'format=duration',
+        '-of', 'default=noprint_wrappers=1:nokey=1',
+        filePath,
+    ];
+    const result = await runMediaTool(ffprobePath, args, { stdinNull: true });
+    if (result.code !== 0) {
+        throw new Error(`ffprobe failed (${result.code}): ${result.stderr.trim() || 'unknown error'}`);
+    }
+    const duration = Number.parseFloat((result.stdout || '').trim());
+    if (!Number.isFinite(duration) || duration <= 0) {
+        throw new Error('Unable to determine track duration.');
+    }
+    return duration;
+}
+
+function parseSilenceIntervals(ffmpegOutput, totalDurationSeconds) {
+    const lines = ffmpegOutput.split(/\r?\n/);
+    const intervals = [];
+    let currentStart = null;
+
+    for (const rawLine of lines) {
+        const line = rawLine.trim();
+        const startMatch = line.match(/silence_start:\s*([0-9.]+)/i);
+        if (startMatch) {
+            const parsedStart = Number.parseFloat(startMatch[1]);
+            if (Number.isFinite(parsedStart)) {
+                currentStart = parsedStart;
+            }
+            continue;
+        }
+
+        const endMatch = line.match(/silence_end:\s*([0-9.]+)/i);
+        if (endMatch) {
+            const parsedEnd = Number.parseFloat(endMatch[1]);
+            if (!Number.isFinite(parsedEnd)) continue;
+
+            const intervalStart = Number.isFinite(currentStart) ? currentStart : 0;
+            intervals.push({
+                start: Math.max(0, intervalStart),
+                end: Math.max(0, parsedEnd),
+            });
+            currentStart = null;
+        }
+    }
+
+    if (Number.isFinite(currentStart)) {
+        intervals.push({ start: Math.max(0, currentStart), end: totalDurationSeconds });
+    }
+
+    return intervals;
+}
+
+async function detectLeadingTrailingSilence(filePath, thresholdDb, minimumSilenceSeconds = 0.2) {
+    const ffmpegPath = getMediaToolPath('ffmpeg');
+    const duration = await getTrackDurationSeconds(filePath);
+    const safeThreshold = Math.min(80, Math.max(10, thresholdDb));
+    const args = [
+        '-hide_banner',
+        '-i', filePath,
+        '-af', `silencedetect=noise=-${safeThreshold}dB:d=${minimumSilenceSeconds}`,
+        '-f', 'null',
+        '-',
+    ];
+
+    const probe = await runMediaTool(ffmpegPath, args, { stdinNull: true });
+    if (probe.code !== 0) {
+        throw new Error(`ffmpeg silence scan failed (${probe.code}).`);
+    }
+
+    const intervals = parseSilenceIntervals(probe.stderr || '', duration);
+    const epsilon = 0.05;
+
+    let trimStartTo = 0;
+    const leading = intervals.find(interval => interval.start <= epsilon && interval.end > interval.start);
+    if (leading) {
+        trimStartTo = Math.min(duration, Math.max(0, leading.end));
+    }
+
+    let trimEndFrom = duration;
+    const trailing = [...intervals].reverse().find(interval => interval.end >= (duration - epsilon) && interval.end > interval.start);
+    if (trailing) {
+        trimEndFrom = Math.min(duration, Math.max(0, trailing.start));
+    }
+
+    if (trimEndFrom <= trimStartTo) {
+        return {
+            duration,
+            trimStartTo: 0,
+            trimEndFrom: duration,
+            hasTrim: false,
+        };
+    }
+
+    const hasLeadingTrim = trimStartTo > epsilon;
+    const hasTrailingTrim = trimEndFrom < (duration - epsilon);
+
+    return {
+        duration,
+        trimStartTo,
+        trimEndFrom,
+        hasTrim: hasLeadingTrim || hasTrailingTrim,
+    };
+}
+
+function getCodecArgsForExtension(filePath) {
+    const extension = path.extname(filePath).toLowerCase();
+    if (extension === '.m4a') return ['-c:a', 'aac', '-b:a', '192k'];
+    if (extension === '.mp3') return ['-c:a', 'libmp3lame', '-q:a', '2'];
+    if (extension === '.wav') return ['-c:a', 'pcm_s16le'];
+    if (extension === '.flac') return ['-c:a', 'flac'];
+    if (extension === '.ogg') return ['-c:a', 'libvorbis', '-q:a', '5'];
+    if (extension === '.webm') return ['-c:a', 'libopus', '-b:a', '160k'];
+    return ['-c:a', 'copy'];
+}
+
+async function trimTrackSilenceInPlace(filePath, thresholdDb) {
+    const { trimStartTo, trimEndFrom, hasTrim } = await detectLeadingTrailingSilence(filePath, thresholdDb);
+    if (!hasTrim) {
+        return { modified: false };
+    }
+
+    const keptDuration = trimEndFrom - trimStartTo;
+    if (keptDuration <= 0.4) {
+        return { modified: false };
+    }
+
+    const extension = path.extname(filePath);
+    const baseName = path.basename(filePath, extension);
+    const tempOutputPath = path.join(
+        path.dirname(filePath),
+        `${baseName}.trim-${Date.now()}-${Math.random().toString(36).slice(2, 8)}${extension}`
+    );
+
+    const ffmpegPath = getMediaToolPath('ffmpeg');
+    const ffmpegArgs = [
+        '-y',
+        '-hide_banner',
+        '-loglevel', 'error',
+        '-ss', `${trimStartTo}`,
+        '-to', `${trimEndFrom}`,
+        '-i', filePath,
+        '-vn',
+        ...getCodecArgsForExtension(filePath),
+        tempOutputPath,
+    ];
+
+    const trimRun = await runMediaTool(ffmpegPath, ffmpegArgs, { stdinNull: true });
+    if (trimRun.code !== 0 || !fs.existsSync(tempOutputPath)) {
+        if (fs.existsSync(tempOutputPath)) {
+            await fs.promises.rm(tempOutputPath, { force: true });
+        }
+        throw new Error(`ffmpeg trim failed (${trimRun.code}).`);
+    }
+
+    const backup = await moveToUndoTrash(filePath);
+    try {
+        await fs.promises.rename(tempOutputPath, filePath);
+    } catch (error) {
+        if (fs.existsSync(tempOutputPath)) {
+            await fs.promises.rm(tempOutputPath, { force: true });
+        }
+        await restoreFromUndoTrash(backup.trashPath, backup.originalPath);
+        throw error;
+    }
+
+    return { modified: true, backup };
+}
+
+async function ensureTrimUndoManifestDir() {
+    await fs.promises.mkdir(trimUndoManifestPath, { recursive: true });
+}
+
+function getTrimUndoManifestFilePath(manifestId) {
+    return path.join(trimUndoManifestPath, `${manifestId}.json`);
+}
+
+async function writeTrimUndoManifest(manifestId, data) {
+    await ensureTrimUndoManifestDir();
+    await fs.promises.writeFile(getTrimUndoManifestFilePath(manifestId), JSON.stringify(data, null, 2), 'utf-8');
+}
+
+async function saveTrimUndoManifest(items) {
+    const manifestId = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+    await writeTrimUndoManifest(manifestId, {
+        createdAt: new Date().toISOString(),
+        items,
+    });
+    return manifestId;
+}
+
+async function readTrimUndoManifest(manifestId) {
+    if (!manifestId) return null;
+    const filePath = getTrimUndoManifestFilePath(manifestId);
+    if (!fs.existsSync(filePath)) return null;
+    const raw = await fs.promises.readFile(filePath, 'utf-8');
+    return JSON.parse(raw);
+}
+
+async function deleteTrimUndoManifest(manifestId) {
+    if (!manifestId) return;
+    const filePath = getTrimUndoManifestFilePath(manifestId);
+    if (fs.existsSync(filePath)) {
+        await fs.promises.rm(filePath, { force: true });
+    }
 }
 
 function buildUndoTrashItemPath(targetPath) {
