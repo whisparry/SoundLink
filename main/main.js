@@ -740,18 +740,31 @@ app.whenReady().then(() => {
         try {
             if (!playlistPath || !fs.existsSync(playlistPath)) return { tracks: [], totalDuration: 0 };
             const files = await fs.promises.readdir(playlistPath);
-            const tracks = [];
-            // FIX: Removed the slow metadata reading loop to make playlist loading instant.
-            for (const file of files) {
+            const trackCandidates = files.filter(file => supportedExtensions.includes(path.extname(file).toLowerCase()));
+            const tracks = await Promise.all(trackCandidates.map(async (file) => {
                 const ext = path.extname(file).toLowerCase();
-                if (supportedExtensions.includes(ext)) {
-                    const filePath = path.join(playlistPath, file);
-                    // We no longer read metadata, so duration is set to 0.
-                    tracks.push({ name: path.basename(file, ext), path: filePath, duration: 0 });
+                const filePath = path.join(playlistPath, file);
+                let duration = 0;
+
+                try {
+                    const metadata = await mm.parseFile(filePath, { duration: true, skipCovers: true });
+                    if (metadata?.format?.duration && Number.isFinite(metadata.format.duration)) {
+                        duration = metadata.format.duration;
+                    }
+                } catch {
+                    duration = 0;
                 }
-            }
-            // Total duration is no longer calculated.
-            return { tracks, totalDuration: 0 };
+
+                return {
+                    name: path.basename(file, ext),
+                    path: filePath,
+                    duration,
+                    tags: getTrackTagsForPath(filePath),
+                };
+            }));
+
+            const totalDuration = tracks.reduce((sum, track) => sum + (Number.isFinite(track.duration) ? track.duration : 0), 0);
+            return { tracks, totalDuration };
         } catch (err) {
             console.error(`Error loading tracks from "${playlistPath}":`, err);
             return { tracks: [], totalDuration: 0 };
@@ -784,6 +797,57 @@ app.whenReady().then(() => {
         } catch (err) {
             console.error(`Error calculating duration for "${playlistPath}":`, err);
             return 0;
+        }
+    });
+
+    ipcMain.handle('get-playlist-details', async (_event, playlistPath) => {
+        try {
+            if (!playlistPath || !fs.existsSync(playlistPath)) {
+                return { success: false, error: 'Playlist folder does not exist.' };
+            }
+
+            const playlistStat = await fs.promises.stat(playlistPath);
+            const files = await fs.promises.readdir(playlistPath);
+            const trackCandidates = files.filter(file => supportedExtensions.includes(path.extname(file).toLowerCase()));
+
+            let totalDurationSeconds = 0;
+            let totalSizeBytes = 0;
+
+            await Promise.all(trackCandidates.map(async (file) => {
+                const filePath = path.join(playlistPath, file);
+
+                try {
+                    const stat = await fs.promises.stat(filePath);
+                    totalSizeBytes += Number.isFinite(stat.size) ? stat.size : 0;
+                } catch {
+                    // noop
+                }
+
+                try {
+                    const metadata = await mm.parseFile(filePath, { duration: true, skipCovers: true });
+                    if (metadata?.format?.duration && Number.isFinite(metadata.format.duration)) {
+                        totalDurationSeconds += metadata.format.duration;
+                    }
+                } catch {
+                    // noop
+                }
+            }));
+
+            return {
+                success: true,
+                details: {
+                    name: path.basename(playlistPath),
+                    path: playlistPath,
+                    trackCount: trackCandidates.length,
+                    totalDurationSeconds,
+                    totalSizeBytes,
+                    totalSizeFormatted: formatBytes(totalSizeBytes),
+                    createdAt: playlistStat.birthtime?.toISOString?.() || null,
+                    modifiedAt: playlistStat.mtime?.toISOString?.() || null,
+                },
+            };
+        } catch (error) {
+            return { success: false, error: error.message };
         }
     });
 

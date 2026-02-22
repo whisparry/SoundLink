@@ -45,6 +45,38 @@ function formatTrackDetailsDuration(durationSeconds) {
     return `${minutes}:${String(seconds).padStart(2, '0')}`;
 }
 
+function formatTrackListDuration(durationSeconds) {
+    if (!Number.isFinite(durationSeconds) || durationSeconds <= 0) return '--:--';
+    const rounded = Math.round(durationSeconds);
+    const hours = Math.floor(rounded / 3600);
+    const minutes = Math.floor((rounded % 3600) / 60);
+    const seconds = rounded % 60;
+    if (hours > 0) {
+        return `${hours}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+    }
+    return `${minutes}:${String(seconds).padStart(2, '0')}`;
+}
+
+function formatPlaylistDetailsDate(value) {
+    if (!value) return 'Unknown';
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) return 'Unknown';
+    return parsed.toLocaleString();
+}
+
+function buildPlaylistDetailsMessage(details) {
+    return [
+        `Playlist: ${details.name || 'Unknown'}`,
+        `Tracks: ${Number.isFinite(details.trackCount) ? details.trackCount : 0}`,
+        `Total duration: ${formatTrackDetailsDuration(details.totalDurationSeconds)}`,
+        `Size: ${details.totalSizeFormatted || 'Unknown'}`,
+        `Created: ${formatPlaylistDetailsDate(details.createdAt)}`,
+        `Modified: ${formatPlaylistDetailsDate(details.modifiedAt)}`,
+        '',
+        `Folder path: ${details.path || 'Unknown'}`,
+    ].join('\n');
+}
+
 function buildTrackDetailsMessage(details) {
     const tagText = Array.isArray(details.tags) && details.tags.length > 0 ? details.tags.join(', ') : 'None';
     return [
@@ -97,6 +129,16 @@ async function goToTrackFileFromContext(track) {
     }
 }
 
+async function showPlaylistInfoFromContext(playlist) {
+    const result = await window.electronAPI.getPlaylistDetails(playlist.path);
+    if (!result?.success || !result.details) {
+        ctx.helpers.showNotification('error', 'More Info Failed', result?.error || 'Could not load playlist details.');
+        return;
+    }
+
+    await ctx.helpers.showInfoDialog('Playlist Details', buildPlaylistDetailsMessage(result.details), { confirmText: 'Close' });
+}
+
 async function pmRenderTracks(playlistPath) {
     const { pmTracksContainer, pmTrackSearchInput, moveTrackNameEl, moveTrackDestinationSelect, moveTrackModal } = ctx.elements;
     log('Rendering tracks', { playlistPath });
@@ -118,7 +160,14 @@ async function pmRenderTracks(playlistPath) {
         filteredTracks.forEach(track => {
             const item = document.createElement('div');
             item.className = 'pm-track-item';
-            item.innerHTML = `<span class="pm-track-name" title="${track.name}">${track.name}</span><div class="pm-track-actions"><button class="pm-action-btn">Move</button><button class="pm-action-btn pm-delete-btn">Delete</button></div>`;
+            const primaryTag = Array.isArray(track.tags) && track.tags.length > 0 ? track.tags[0] : '';
+            const hasMoreTags = Array.isArray(track.tags) && track.tags.length > 1;
+            const tagSuffix = hasMoreTags ? ` +${track.tags.length - 1}` : '';
+            const tagMarkup = primaryTag
+                ? `<span class="track-tag-shell"><span class="track-tag-badge" title="${primaryTag}">${primaryTag}${tagSuffix}</span></span>`
+                : `<span class="track-tag-shell empty"></span>`;
+
+            item.innerHTML = `<span class="pm-track-name" title="${track.name}">${track.name}</span><span class="pm-track-meta"><span class="track-duration">${formatTrackListDuration(track.duration)}</span>${tagMarkup}</span><div class="pm-track-actions"><button class="pm-action-btn">Move</button><button class="pm-action-btn pm-delete-btn">Delete</button></div>`;
             pmTracksContainer.appendChild(item);
 
             const moveButton = item.querySelector('.pm-action-btn:not(.pm-delete-btn)');
@@ -274,6 +323,11 @@ async function pmRenderPlaylists() {
                 e.preventDefault();
                 const playlistNameSpan = item.querySelector('.playlist-name');
                 const menuItems = [
+                    {
+                        label: 'More info',
+                        action: () => { void showPlaylistInfoFromContext(p); }
+                    },
+                    { type: 'separator' },
                     {
                         label: 'Rename',
                         action: () => playlistNameSpan.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }))

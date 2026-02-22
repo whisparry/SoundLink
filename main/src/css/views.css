@@ -1075,6 +1075,50 @@ body.hide-mix-buttons .player-playlists-panel .playlist-add-btn {
     text-overflow: ellipsis;
 }
 
+.player-track-meta,
+.pm-track-meta {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-shrink: 0;
+}
+
+.track-duration {
+    color: var(--text-secondary);
+    font-size: 12px;
+    min-width: 44px;
+    text-align: right;
+}
+
+.track-tag-shell {
+    min-width: 72px;
+    display: flex;
+    justify-content: flex-end;
+}
+
+.track-tag-shell.empty {
+    min-width: 72px;
+}
+
+.track-tag-badge {
+    max-width: 120px;
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 11px;
+    line-height: 1.2;
+    color: var(--accent-text-color);
+    background-color: var(--accent-primary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.player-track-item.playing .track-duration {
+    color: var(--accent-text-color);
+}
+
 .pm-track-name {
     flex-grow: 1;
     white-space: nowrap;
