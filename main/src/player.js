@@ -337,8 +337,8 @@ function drawSpectrogram(frequencyData, level) {
     const gap = 2;
     const totalGapWidth = (bars - 1) * gap;
     const barWidth = Math.max((spectrogramWidth - totalGapWidth) / bars, 2);
-    const baseFloor = spectrogramHeight * 0.14;
-    const dynamicRange = spectrogramHeight * (0.3 + (level * 0.55));
+    const baseFloor = spectrogramHeight * 0.1;
+    const dynamicRange = spectrogramHeight * (0.6 + (level * 0.3));
     const spectrogramRgb = getComputedStyle(ctx.elements.root)
         .getPropertyValue('--audio-spectrogram-rgb')
         .trim() || '59, 130, 246';
@@ -347,9 +347,9 @@ function drawSpectrogram(frequencyData, level) {
     for (let index = 0; index < bars; index += 1) {
         const normalized = frequencyData[index] / 255;
         const barHeight = baseFloor + (normalized * dynamicRange);
-        const alpha = 0.08 + (normalized * 0.28) + (level * 0.08);
+        const alpha = 0.3 + (normalized * 0.5) + (level * 0.2);
         const y = spectrogramHeight - barHeight;
-        drawContext.fillStyle = `rgba(${spectrogramRgb}, ${Math.min(alpha, 0.46).toFixed(3)})`;
+        drawContext.fillStyle = `rgba(${spectrogramRgb}, ${Math.min(alpha, 1.0).toFixed(3)})`;
         drawContext.fillRect(x, y, barWidth, barHeight);
         x += barWidth + gap;
     }

@@ -51,8 +51,6 @@
         </div>
 
         <div class="content">
-            <canvas id="audio-spectrogram-overlay" aria-hidden="true"></canvas>
-
             <div id="update-notification" class="update-notification hidden">
                 <p id="update-message"></p>
                 <button id="restart-btn" class="hidden">Restart to Update</button>
@@ -362,42 +360,46 @@
                     </div>
                 </div>
                 <div class="player-controls-bar">
-                    <div id="now-playing">Select a song to play</div>
-                    <div class="progress-container">
-                        <span id="current-time">0:00</span>
-                        <div id="progress-bar-container">
-                            <div id="progress-bar"></div>
-                        </div>
-                        <span id="total-duration">0:00</span>
-                    </div>
-                    <div class="player-controls-row">
-                        <div class="left-controls">
-                            <button id="shuffle-btn" class="shuffle-btn" title="Shuffle">
-                                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 3 21 3 21 8"></polyline><line x1="4" y1="20" x2="21" y2="3"></line><polyline points="16 21 21 21 21 16"></polyline><line x1="4" y1="4" x2="21" y2="21"></line></svg>
-                            </button>
-                            <button id="repeat-btn" class="shuffle-btn" title="Repeat">
-                                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m17 2 4 4-4 4"/><path d="M3 11v-1a4 4 0 0 1 4-4h14"/><path d="m7 22-4-4 4-4"/><path d="M21 13v1a4 4 0 0 1-4 4H3"/></svg>
-                            </button>
-                            <span id="repeat-status-text"></span>
-                        </div>
-                        <div class="main-controls">
-                            <button id="prev-btn" class="player-btn">
-                                <svg class="player-icon" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="19 20 9 12 19 4 19 20"></polygon><line x1="5" y1="19" x2="5" y2="5"></line></svg>
-                            </button>
-                            <button id="play-pause-btn" class="player-btn play-btn">
-                                <svg class="play-icon player-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"></path></svg>
-                                <svg class="pause-icon player-icon hidden" viewBox="0 0 24 24" fill="currentColor"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"></path></svg>
-                            </button>
-                            <button id="next-btn" class="player-btn">
-                                <svg class="player-icon" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 4 15 12 5 20 5 4"></polygon><line x1="19" y1="5" x2="19" y2="19"></line></svg>
-                            </button>
-                        </div>
-                        <div class="volume-container">
-                            <div id="volume-icon-container">
-                                <svg id="volume-icon-up" class="player-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path></svg>
-                                <svg id="volume-icon-mute" class="player-icon hidden" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><line x1="23" y1="9" x2="17" y2="15"></line><line x1="17" y1="9" x2="23" y2="15"></line></svg>
+                    <canvas id="audio-spectrogram-overlay" aria-hidden="true"></canvas>
+                    <div class="player-controls-glass"></div>
+                    <div class="player-controls-content">
+                        <div id="now-playing">Select a song to play</div>
+                        <div class="progress-container">
+                            <span id="current-time">0:00</span>
+                            <div id="progress-bar-container">
+                                <div id="progress-bar"></div>
                             </div>
-                            <input type="range" id="volume-slider" min="0" max="1" step="0.01" value="1">
+                            <span id="total-duration">0:00</span>
+                        </div>
+                        <div class="player-controls-row">
+                            <div class="left-controls">
+                                <button id="shuffle-btn" class="shuffle-btn" title="Shuffle">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 3 21 3 21 8"></polyline><line x1="4" y1="20" x2="21" y2="3"></line><polyline points="16 21 21 21 21 16"></polyline><line x1="4" y1="4" x2="21" y2="21"></line></svg>
+                                </button>
+                                <button id="repeat-btn" class="shuffle-btn" title="Repeat">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m17 2 4 4-4 4"/><path d="M3 11v-1a4 4 0 0 1 4-4h14"/><path d="m7 22-4-4 4-4"/><path d="M21 13v1a4 4 0 0 1-4 4H3"/></svg>
+                                </button>
+                                <span id="repeat-status-text"></span>
+                            </div>
+                            <div class="main-controls">
+                                <button id="prev-btn" class="player-btn">
+                                    <svg class="player-icon" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="19 20 9 12 19 4 19 20"></polygon><line x1="5" y1="19" x2="5" y2="5"></line></svg>
+                                </button>
+                                <button id="play-pause-btn" class="player-btn play-btn">
+                                    <svg class="play-icon player-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"></path></svg>
+                                    <svg class="pause-icon player-icon hidden" viewBox="0 0 24 24" fill="currentColor"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"></path></svg>
+                                </button>
+                                <button id="next-btn" class="player-btn">
+                                    <svg class="player-icon" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 4 15 12 5 20 5 4"></polygon><line x1="19" y1="5" x2="19" y2="19"></line></svg>
+                                </button>
+                            </div>
+                            <div class="volume-container">
+                                <div id="volume-icon-container">
+                                    <svg id="volume-icon-up" class="player-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path></svg>
+                                    <svg id="volume-icon-mute" class="player-icon hidden" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><line x1="23" y1="9" x2="17" y2="15"></line><line x1="17" y1="9" x2="23" y2="15"></line></svg>
+                                </div>
+                                <input type="range" id="volume-slider" min="0" max="1" step="0.01" value="1">
+                            </div>
                         </div>
                     </div>
                 </div>

@@ -94,22 +94,6 @@
     flex-direction: column; /* Stack children vertically */
 }
 
-#audio-spectrogram-overlay {
-    position: absolute;
-    inset: 0;
-    width: 100%;
-    height: 100%;
-    pointer-events: none;
-    z-index: 1;
-    opacity: 0;
-    transition: opacity 0.2s ease;
-    mix-blend-mode: soft-light;
-}
-
-body.audio-visual-sync-enabled.audio-visual-sync-active #audio-spectrogram-overlay {
-    opacity: 1;
-}
-
 body.audio-visual-sync-enabled .container {
     transition: box-shadow 120ms linear;
 }

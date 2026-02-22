@@ -1129,13 +1129,48 @@ body.hide-mix-buttons .player-playlists-panel .playlist-add-btn {
     flex-shrink: 0;
     display: flex;
     flex-direction: column;
-    gap: 10px;
     padding: 15px 25px;
-    background-color: var(--bg-secondary);
+    background-color: transparent;
     border-top: 1px solid var(--border-color);
     border-radius: 12px;
     overflow: hidden;
     min-width: 0;
+}
+
+#audio-spectrogram-overlay {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    z-index: 0;
+    opacity: 0;
+    transition: opacity 0.2s ease;
+    /* mix-blend-mode: soft-light; */ /* Removed so it's clearly visible behind the glass */
+}
+
+body.audio-visual-sync-enabled.audio-visual-sync-active #audio-spectrogram-overlay {
+    opacity: 1;
+}
+
+.player-controls-glass {
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    background-color: rgba(30, 30, 30, 0.75);
+    background-color: color-mix(in srgb, var(--bg-secondary) 75%, transparent);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    pointer-events: none;
+}
+
+.player-controls-content {
+    position: relative;
+    z-index: 2;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    width: 100%;
 }
 
 .player-buttons-wrapper {
