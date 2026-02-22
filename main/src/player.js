@@ -44,7 +44,7 @@ let spectrogramWidth = 0;
 let spectrogramHeight = 0;
 
 const VISUAL_SYNC_SMOOTHING = 0.2;
-const SPECTROGRAM_BAR_COUNT = 56;
+const SPECTROGRAM_BAR_COUNT = 40;
 let playerState = {
     playlistSearchQuery: '',
     trackSearchQuery: '',
@@ -334,23 +334,28 @@ function drawSpectrogram(frequencyData, level) {
     drawContext.clearRect(0, 0, spectrogramWidth, spectrogramHeight);
 
     const bars = Math.min(SPECTROGRAM_BAR_COUNT, frequencyData.length);
-    const gap = 2;
+    const gap = 6;
     const totalGapWidth = (bars - 1) * gap;
-    const barWidth = Math.max((spectrogramWidth - totalGapWidth) / bars, 2);
+    const barWidth = Math.max((spectrogramWidth - totalGapWidth) / bars, 4);
     const baseFloor = spectrogramHeight * 0.1;
     const dynamicRange = spectrogramHeight * (0.6 + (level * 0.3));
     const spectrogramRgb = getComputedStyle(ctx.elements.root)
         .getPropertyValue('--audio-spectrogram-rgb')
         .trim() || '59, 130, 246';
 
-    let x = 0;
+    let x = gap / 2; // Start with a small offset
     for (let index = 0; index < bars; index += 1) {
         const normalized = frequencyData[index] / 255;
         const barHeight = baseFloor + (normalized * dynamicRange);
-        const alpha = 0.3 + (normalized * 0.5) + (level * 0.2);
+        const alpha = 0.4 + (normalized * 0.4) + (level * 0.2);
         const y = spectrogramHeight - barHeight;
+        
+        // Draw rounded pillars
         drawContext.fillStyle = `rgba(${spectrogramRgb}, ${Math.min(alpha, 1.0).toFixed(3)})`;
-        drawContext.fillRect(x, y, barWidth, barHeight);
+        drawContext.beginPath();
+        drawContext.roundRect(x, y, barWidth, barHeight, [barWidth / 2, barWidth / 2, 0, 0]);
+        drawContext.fill();
+        
         x += barWidth + gap;
     }
 }

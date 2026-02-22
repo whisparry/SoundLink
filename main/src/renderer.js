@@ -945,12 +945,75 @@ window.addEventListener('DOMContentLoaded', () => {
     }
 
     function updateSpectrogramTint(theme) {
-        const baseColor = parseHexColor(theme?.['--bg-primary'])
-            || parseHexColor(theme?.['--accent-primary'])
-            || [59, 130, 246];
-        const isDarkTheme = getRelativeLuminance(baseColor) < 0.45;
-        const targetTone = isDarkTheme ? [255, 255, 255] : [0, 0, 0];
-        const tintColor = blendRgb(baseColor, targetTone, 0.26);
+        const bgColor = parseHexColor(theme?.['--bg-primary']) || [18, 18, 18];
+        
+        let r = bgColor[0] / 255, g = bgColor[1] / 255, b = bgColor[2] / 255;
+        let max = Math.max(r, g, b), min = Math.min(r, g, b);
+        let h, s, l = (max + min) / 2;
+
+        if (max == min) {
+            h = s = 0;
+        } else {
+            let d = max - min;
+            s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+            switch (max) {
+                case r: h = (g - b) / d + (g < b ? 6 : 0); break;
+                case g: h = (b - r) / d + 2; break;
+                case b: h = (r - g) / d + 4; break;
+            }
+            h /= 6;
+        }
+
+        // Complementary hue
+        h = (h + 0.5) % 1;
+        
+        // If the background is grayscale, use the accent color's hue instead
+        if (s < 0.1) {
+            const accentColor = parseHexColor(theme?.['--accent-primary']) || [59, 130, 246];
+            let ar = accentColor[0] / 255, ag = accentColor[1] / 255, ab = accentColor[2] / 255;
+            let amax = Math.max(ar, ag, ab), amin = Math.min(ar, ag, ab);
+            let ah, as, al = (amax + amin) / 2;
+            if (amax !== amin) {
+                let ad = amax - amin;
+                as = al > 0.5 ? ad / (2 - amax - amin) : ad / (amax + amin);
+                switch (amax) {
+                    case ar: ah = (ag - ab) / ad + (ag < ab ? 6 : 0); break;
+                    case ag: ah = (ab - ar) / ad + 2; break;
+                    case ab: ah = (ar - ag) / ad + 4; break;
+                }
+                ah /= 6;
+                h = ah;
+                s = as;
+            }
+        }
+
+        // Ensure contrast in lightness
+        if (l < 0.5) {
+            l = Math.min(1, l + 0.6); // Make it light
+        } else {
+            l = Math.max(0, l - 0.6); // Make it dark
+        }
+
+        let compR, compG, compB;
+        if (s === 0) {
+            compR = compG = compB = l;
+        } else {
+            const hue2rgb = (p, q, t) => {
+                if (t < 0) t += 1;
+                if (t > 1) t -= 1;
+                if (t < 1/6) return p + (q - p) * 6 * t;
+                if (t < 1/2) return q;
+                if (t < 2/3) return p + (q - p) * (2/3 - t) * 6;
+                return p;
+            };
+            let q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+            let p = 2 * l - q;
+            compR = hue2rgb(p, q, h + 1/3);
+            compG = hue2rgb(p, q, h);
+            compB = hue2rgb(p, q, h - 1/3);
+        }
+
+        const tintColor = [Math.round(compR * 255), Math.round(compG * 255), Math.round(compB * 255)];
         root.style.setProperty('--audio-spectrogram-rgb', `${tintColor[0]}, ${tintColor[1]}, ${tintColor[2]}`);
     }
 
