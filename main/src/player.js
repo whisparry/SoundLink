@@ -43,6 +43,9 @@ let spectrogramContext = null;
 let spectrogramWidth = 0;
 let spectrogramHeight = 0;
 
+let sleepTimerInterval = null;
+let sleepTimerEndTime = null;
+
 const VISUAL_SYNC_SMOOTHING = 0.2;
 const SPECTROGRAM_BAR_COUNT = 40;
 let playerState = {
@@ -456,6 +459,62 @@ function resetPlaybackState() {
     updateNowPlaying();
 }
 
+function setSleepTimer(minutes) {
+    if (sleepTimerInterval) {
+        clearInterval(sleepTimerInterval);
+        sleepTimerInterval = null;
+    }
+    
+    const { sleepTimerDisplay, sleepTimerBtn } = ctx.elements;
+    
+    if (minutes === 0) {
+        sleepTimerEndTime = null;
+        sleepTimerDisplay.classList.add('hidden');
+        sleepTimerBtn.classList.remove('active');
+        log('Sleep timer cancelled');
+        return;
+    }
+    
+    sleepTimerEndTime = Date.now() + minutes * 60 * 1000;
+    sleepTimerBtn.classList.add('active');
+    sleepTimerDisplay.classList.remove('hidden');
+    
+    updateSleepTimerDisplay();
+    sleepTimerInterval = setInterval(() => {
+        updateSleepTimerDisplay();
+        if (Date.now() >= sleepTimerEndTime) {
+            clearInterval(sleepTimerInterval);
+            sleepTimerInterval = null;
+            sleepTimerEndTime = null;
+            sleepTimerDisplay.classList.add('hidden');
+            sleepTimerBtn.classList.remove('active');
+            pause();
+            log('Sleep timer finished, playback paused');
+        }
+    }, 1000);
+    
+    log('Sleep timer set', { minutes });
+}
+
+function updateSleepTimerDisplay() {
+    if (!sleepTimerEndTime) return;
+    const remaining = Math.max(0, Math.ceil((sleepTimerEndTime - Date.now()) / 1000));
+    const { sleepTimerDisplay } = ctx.elements;
+    sleepTimerDisplay.textContent = formatTime(remaining);
+}
+
+function showSleepTimerMenu(event) {
+    const menuItems = [
+        { label: '15 minutes', action: () => setSleepTimer(15) },
+        { label: '30 minutes', action: () => setSleepTimer(30) },
+        { label: '45 minutes', action: () => setSleepTimer(45) },
+        { label: '60 minutes', action: () => setSleepTimer(60) },
+        { type: 'separator' },
+        { label: 'Cancel Timer', action: () => setSleepTimer(0) }
+    ];
+    ctx.helpers.showContextMenu(event.clientX, event.clientY, menuItems);
+}
+
 // --- Playlist & Track Rendering ---
 
 function syncSharedActiveState() {
@@ -804,6 +863,8 @@ async function renderActiveTracks(options = {}) {
     if (activeIds.length === 0) {
         log('Render tracks called with no active playlists');
         playerTracksContainer.innerHTML = `<div class="empty-playlist-message">Select a playlist to see its tracks.</div>`;
+        const { playerTracksStats } = ctx.elements;
+        if (playerTracksStats) playerTracksStats.textContent = '';
         currentTracklist = [];
         currentTrackIndex = -1;
         resetPlaybackState();
@@ -821,6 +882,22 @@ async function renderActiveTracks(options = {}) {
         allPlaylistResults.forEach(({ tracks }, resultIndex) => {
             mergedTracklist.push(...buildTracklistForPlaylist(tracks, activeIds[resultIndex]));
         });
+
+        const { playerTracksStats } = ctx.elements;
+        if (playerTracksStats) {
+            const trackCount = mergedTracklist.length;
+            playerTracksStats.textContent = `${trackCount} track${trackCount !== 1 ? 's' : ''} • ...`;
+            
+            Promise.all(activeIds.map(playlistPath => window.electronAPI.getPlaylistDuration(playlistPath)))
+                .then(durations => {
+                    const totalDurationSeconds = durations.reduce((sum, d) => sum + d, 0);
+                    const hours = Math.floor(totalDurationSeconds / 3600);
+                    const minutes = Math.floor((totalDurationSeconds % 3600) / 60);
+                    const durationStr = `${hours}:${minutes.toString().padStart(2, '0')}`;
+                    playerTracksStats.textContent = `${trackCount} track${trackCount !== 1 ? 's' : ''} • ${durationStr}`;
+                })
+                .catch(err => logError('Failed to get duration for stats', { error: err.message }));
+        }
 
         const normalizedTracklist = normalizeQueueNumbers(mergedTracklist);
         originalTracklist = [...normalizedTracklist];
@@ -900,6 +977,17 @@ async function renderPlaylists() {
         const playlists = await window.electronAPI.getPlaylists();
         playerState.allPlaylists = playlists || [];
 
+        const { playerPlaylistsStats } = ctx.elements;
+        if (playerPlaylistsStats) {
+            playerPlaylistsStats.textContent = `${playlists.length} playlist${playlists.length !== 1 ? 's' : ''} • ... tracks`;
+            Promise.all(playlists.map(p => window.electronAPI.getPlaylistTracks(p.path)))
+                .then(results => {
+                    const totalTracks = results.reduce((sum, res) => sum + res.tracks.length, 0);
+                    playerPlaylistsStats.textContent = `${playlists.length} playlist${playlists.length !== 1 ? 's' : ''} • ${totalTracks} track${totalTracks !== 1 ? 's' : ''}`;
+                })
+                .catch(err => logError('Failed to get track counts for stats', { error: err.message }));
+        }
+
         const availablePlaylistIds = new Set(playerState.allPlaylists.map(p => p.path));
         const prunedActiveIds = playerState.activePlaylistIds.filter(id => availablePlaylistIds.has(id));
         const activeIdsChanged = prunedActiveIds.length !== playerState.activePlaylistIds.length;
@@ -913,6 +1001,8 @@ async function renderPlaylists() {
 
         if (!playlists || playlists.length === 0) {
             playerPlaylistsContainer.innerHTML = `<div class="empty-playlist-message">No playlists found. Set the playlist folder in Settings.</div>`;
+            const { playerPlaylistsStats } = ctx.elements;
+            if (playerPlaylistsStats) playerPlaylistsStats.textContent = '';
             await setActivePlaylists([], { autoplayFirstTrack: false, preserveCurrentTrack: false });
             return;
         }
@@ -1001,7 +1091,8 @@ export function initializePlayer(context) {
     const { 
         playPauseBtn, prevBtn, nextBtn,
         progressBarContainer, volumeSlider, volumeIconContainer,
-        shuffleBtn, repeatBtn, playerPlaylistSearchInput, playerTrackSearchInput
+        shuffleBtn, repeatBtn, playerPlaylistSearchInput, playerTrackSearchInput,
+        sleepTimerBtn
     } = ctx.elements;
 
     if (ctx.state.activeQueuePaths instanceof Set) {
@@ -1118,6 +1209,7 @@ export function initializePlayer(context) {
     nextBtn.addEventListener('click', playNext);
     shuffleBtn.addEventListener('click', toggleShuffle);
     repeatBtn.addEventListener('click', cycleRepeat);
+    sleepTimerBtn.addEventListener('click', showSleepTimerMenu);
 
     playerPlaylistSearchInput.addEventListener('input', (e) => {
         playerState.playlistSearchQuery = e.target.value.trim().toLowerCase();

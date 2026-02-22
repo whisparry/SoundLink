@@ -11,6 +11,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     createPlaylist: () => ipcRenderer.invoke('create-playlist'),
     getPlaylists: () => ipcRenderer.invoke('get-playlists'),
     getPlaylistTracks: (path) => ipcRenderer.invoke('get-playlist-tracks', path),
+    getPlaylistDuration: (path) => ipcRenderer.invoke('get-playlist-duration', path),
     getLibraryStats: () => ipcRenderer.invoke('get-library-stats'),
     getStats: () => ipcRenderer.invoke('get-stats'),
     resetStats: () => ipcRenderer.invoke('reset-stats'),

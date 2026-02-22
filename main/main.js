@@ -751,6 +751,35 @@ app.whenReady().then(() => {
         }
     });
 
+    ipcMain.handle('get-playlist-duration', async (event, playlistPath) => {
+        try {
+            if (!playlistPath || !fs.existsSync(playlistPath)) return 0;
+            const files = await fs.promises.readdir(playlistPath);
+            let totalDuration = 0;
+            const promises = [];
+            for (const file of files) {
+                const ext = path.extname(file).toLowerCase();
+                if (supportedExtensions.includes(ext)) {
+                    const filePath = path.join(playlistPath, file);
+                    promises.push(
+                        mm.parseFile(filePath, { duration: true, skipCovers: true })
+                            .then(metadata => {
+                                if (metadata.format && metadata.format.duration) {
+                                    totalDuration += metadata.format.duration;
+                                }
+                            })
+                            .catch(() => {})
+                    );
+                }
+            }
+            await Promise.all(promises);
+            return totalDuration;
+        } catch (err) {
+            console.error(`Error calculating duration for "${playlistPath}":`, err);
+            return 0;
+        }
+    });
+
     ipcMain.on('close-app', () => {
         mainWindow.close();
     });
