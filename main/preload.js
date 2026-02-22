@@ -31,6 +31,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getTrackDetails: (filePath) => ipcRenderer.invoke('get-track-details', filePath),
     getTrackTags: (filePath) => ipcRenderer.invoke('get-track-tags', filePath),
     addTrackTag: (payload) => ipcRenderer.invoke('add-track-tag', payload),
+    updateTrackTag: (payload) => ipcRenderer.invoke('update-track-tag', payload),
+    recordTrackPlay: (filePath) => ipcRenderer.invoke('record-track-play', filePath),
     getYtdlpCount: () => ipcRenderer.invoke('get-ytdlp-count'),
     updateYtdlp: () => ipcRenderer.invoke('update-ytdlp'),
     openExternalLink: (url) => ipcRenderer.send('open-external-link', url),

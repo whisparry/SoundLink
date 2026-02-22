@@ -81,10 +81,15 @@ function buildTrackDetailsMessage(details) {
     const tagText = Array.isArray(details.tags) && details.tags.length > 0 ? details.tags.join(', ') : 'None';
     return [
         `Title: ${details.title || details.fileName || 'Unknown'}`,
+        `Artist: ${details.artist || 'Unknown'}`,
+        `Album: ${details.album || 'Unknown'}`,
+        `Genre: ${details.genre || 'Unknown'}`,
         `Source: ${details.source || 'Unknown'}`,
         `Date downloaded: ${formatTrackDetailsDate(details.dateDownloaded)}`,
         `Duration: ${formatTrackDetailsDuration(details.durationSeconds)}`,
         `Bitrate: ${Number.isFinite(details.bitrateKbps) ? `${details.bitrateKbps} kbps` : 'Unknown'}`,
+        `Sample rate: ${Number.isFinite(details.sampleRate) ? `${details.sampleRate} Hz` : 'Unknown'}`,
+        `Channels: ${Number.isFinite(details.channels) ? details.channels : 'Unknown'}`,
         `Size: ${details.sizeFormatted || 'Unknown'}`,
         `Tags: ${tagText}`,
         '',
@@ -120,6 +125,37 @@ async function addTagToTrackFromContext(track) {
     }
 
     ctx.helpers.showNotification('success', 'Tag Added', `"${trimmedTag}" added to "${track.name}".`);
+    await pmRenderTracks(ctx.state.pmSelectedPlaylistPath);
+}
+
+async function editTagOnTrackFromContext(track) {
+    const existingTags = Array.isArray(track.tags) ? track.tags : [];
+    if (existingTags.length === 0) return;
+
+    const currentTag = existingTags[0];
+    const tagInput = await ctx.helpers.showPromptDialog(
+        'Edit Tag',
+        'Edit the tag text, or leave empty to remove it.',
+        currentTag,
+        { confirmText: 'Save Tag', cancelText: 'Cancel', placeholder: 'Tag text' }
+    );
+
+    if (tagInput === null) return;
+
+    const result = await window.electronAPI.updateTrackTag({
+        filePath: track.path,
+        oldTag: currentTag,
+        newTag: tagInput,
+    });
+
+    if (!result?.success) {
+        ctx.helpers.showNotification('error', 'Edit Tag Failed', result?.error || 'Could not update tag.');
+        return;
+    }
+
+    const wasRemoved = !(typeof tagInput === 'string' && tagInput.trim());
+    ctx.helpers.showNotification('success', wasRemoved ? 'Tag Removed' : 'Tag Updated', wasRemoved ? `Removed "${currentTag}".` : `Updated to "${tagInput.trim()}".`);
+    await pmRenderTracks(ctx.state.pmSelectedPlaylistPath);
 }
 
 async function goToTrackFileFromContext(track) {
@@ -155,7 +191,19 @@ async function pmRenderTracks(playlistPath) {
             return;
         }
         const searchQuery = pmTrackSearchInput.value.trim().toLowerCase();
-        const filteredTracks = tracks.filter(t => t.name.toLowerCase().includes(searchQuery));
+        const filteredTracks = tracks.filter((track) => {
+            if (!searchQuery) return true;
+            const tagList = Array.isArray(track.tags) ? track.tags : [];
+            const tagsMatch = tagList.some(tag => tag.toLowerCase().includes(searchQuery));
+
+            if (searchQuery.startsWith('tag:')) {
+                const tagQuery = searchQuery.slice(4).trim();
+                if (!tagQuery) return tagList.length > 0;
+                return tagList.some(tag => tag.toLowerCase().includes(tagQuery));
+            }
+
+            return track.name.toLowerCase().includes(searchQuery) || tagsMatch;
+        });
         log('Tracks filtered', { playlistPath, searchQuery, total: tracks.length, filtered: filteredTracks.length });
         filteredTracks.forEach(track => {
             const item = document.createElement('div');
@@ -208,6 +256,14 @@ async function pmRenderTracks(playlistPath) {
                         action: () => window.electronAPI.showInExplorer(track.path)
                     }
                 ];
+
+                if (Array.isArray(track.tags) && track.tags.length > 0) {
+                    menuItems.splice(2, 0, {
+                        label: 'Edit tag',
+                        action: () => { void editTagOnTrackFromContext(track); }
+                    });
+                }
+
                 ctx.helpers.showContextMenu(e.clientX, e.clientY, menuItems);
             });
 
@@ -303,11 +359,13 @@ async function pmRenderPlaylists() {
         log('Playlists filtered', { total: ctx.state.playlists.length, query: ctx.state.playlistSearchQuery, filtered: filteredPlaylists.length });
         filteredPlaylists.forEach(p => {
             const isFavorite = ctx.state.favoritePlaylists.includes(p.path);
+            const isSmartPlaylist = Boolean(p.isSmart);
             const targetGrid = isFavorite ? pmFavoritePlaylistsGrid : pmAllPlaylistsGrid;
             const item = document.createElement('div');
             item.className = 'playlist-list-item';
+            if (isSmartPlaylist) item.classList.add('smart-playlist-item');
             item.dataset.path = p.path;
-            item.innerHTML = `<span class="playlist-name" title="${p.name}">${p.name}</span><button class="playlist-delete-btn" title="Delete Playlist"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg></button>`;
+            item.innerHTML = `<span class="playlist-name" title="${p.name}">${p.name}</span>${isSmartPlaylist ? '' : '<button class="playlist-delete-btn" title="Delete Playlist"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg></button>'}`;
             targetGrid.appendChild(item);
             item.addEventListener('click', (e) => {
                 if (e.target.closest('.playlist-delete-btn') || e.target.tagName === 'INPUT') return;
@@ -342,8 +400,23 @@ async function pmRenderPlaylists() {
                         action: () => window.electronAPI.showInExplorer(p.path)
                     }
                 ];
+
+                if (isSmartPlaylist) {
+                    const smartMenuItems = [
+                        {
+                            label: 'More info',
+                            action: () => { void showPlaylistInfoFromContext(p); }
+                        }
+                    ];
+                    ctx.helpers.showContextMenu(e.clientX, e.clientY, smartMenuItems);
+                    return;
+                }
                 ctx.helpers.showContextMenu(e.clientX, e.clientY, menuItems);
             });
+
+            if (isSmartPlaylist) {
+                return;
+            }
 
             const playlistNameSpan = item.querySelector('.playlist-name');
             playlistNameSpan.addEventListener('dblclick', () => {

@@ -707,11 +707,6 @@ input[type=range]::-moz-range-thumb {
     padding: 0; /* Remove padding from the root view element */
 }
 
-#player-view {
-    /* FIX: Removed justify-content and align-items to allow content to fill the view. */
-    /* FIX: Removed padding to allow content to go edge-to-edge. */
-}
-
 #player-view.active-view {
     display: grid;
     /* FIX: Removed padding from here as it's now on the base #player-view style. */

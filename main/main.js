@@ -51,6 +51,8 @@ const configPath = path.join(app.getPath('userData'), 'config.json');
 const statsPath = path.join(app.getPath('userData'), 'stats.json');
 const cachePath = path.join(app.getPath('userData'), 'link_cache.json');
 const trackTagsPath = path.join(app.getPath('userData'), 'track_tags.json');
+const metadataCachePath = path.join(app.getPath('userData'), 'track_metadata_cache.json');
+const trackPlayCountsPath = path.join(app.getPath('userData'), 'track_play_counts.json');
 const undoTrashPath = path.join(app.getPath('userData'), 'undo-trash');
 const trimUndoManifestPath = path.join(app.getPath('userData'), 'trim-undo-manifests');
 const ytdlpDir = isDev ? path.join(__dirname, 'yt-dlp') : path.join(process.resourcesPath, 'yt-dlp');
@@ -62,6 +64,8 @@ let config = {};
 let stats = {};
 let linkCache = {};
 let trackTags = {};
+let metadataCache = {};
+let trackPlayCounts = {};
 let downloadsDir = path.join(app.getPath('downloads'), 'SoundLink');
 let mainWindow;
 let tray = null;
@@ -78,6 +82,9 @@ let cachedNodeRuntimePath = undefined;
 let manualLinkRequestCounter = 0;
 const pendingManualLinkRequests = new Map();
 const activeSilenceTrimJobs = new Map();
+
+const SMART_PLAYLIST_RECENTLY_ADDED = '__smart__/recently-added';
+const SMART_PLAYLIST_MOST_PLAYED = '__smart__/most-played';
 
 const DEFAULT_DOWNLOAD_TIMING_STATS = {
     trackSamples: 0,
@@ -236,6 +243,8 @@ function loadConfig() {
                 hideSearchBars: false,
                 hideMixButtons: false,
                 visualThemeSync: false,
+                enableSmartPlaylists: true,
+                libraryPerformanceMode: true,
                 skipManualLinkPrompt: false,
                 durationToleranceSeconds: 20,
                 silenceTrimThresholdDb: 35,
@@ -590,6 +599,8 @@ loadConfig();
 loadStats();
 loadCache();
 loadTrackTags();
+loadMetadataCache();
+loadTrackPlayCounts();
 findYtdlpExecutables();
 if (!fs.existsSync(downloadsDir)) {
     fs.mkdirSync(downloadsDir, { recursive: true });
@@ -725,10 +736,16 @@ app.whenReady().then(() => {
                 return [];
             }
 
-            const entries = await fs.promises.readdir(playlistsPath, { withFileTypes: true });
-            const directories = entries.filter(entry => entry.isDirectory());
-            webContents.send('update-status', `[Playlist Loader] Found ${directories.length} directories.`);
-            return directories.map(entry => ({ name: entry.name, path: path.join(playlistsPath, entry.name) }));
+            const playlists = await getPhysicalPlaylists(playlistsPath);
+            const smartPlaylists = isSmartPlaylistsEnabled()
+                ? [
+                    { name: 'Recently Added', path: SMART_PLAYLIST_RECENTLY_ADDED, isSmart: true },
+                    { name: 'Most Played', path: SMART_PLAYLIST_MOST_PLAYED, isSmart: true },
+                ]
+                : [];
+
+            webContents.send('update-status', `[Playlist Loader] Found ${playlists.length} directories.`);
+            return [...smartPlaylists, ...playlists];
         } catch (err) {
             console.error('Error loading playlists:', err);
             webContents.send('update-status', `[Playlist Loader] CRITICAL ERROR: ${err.message}`);
@@ -738,31 +755,34 @@ app.whenReady().then(() => {
 
     ipcMain.handle('get-playlist-tracks', async (event, playlistPath) => {
         try {
-            if (!playlistPath || !fs.existsSync(playlistPath)) return { tracks: [], totalDuration: 0 };
+            if (!playlistPath) return { tracks: [], totalDuration: 0 };
+
+            if (isSmartPlaylistPath(playlistPath)) {
+                const smart = await getSmartPlaylistTracks(playlistPath);
+                if (smart.cacheUpdated) saveMetadataCache();
+                return { tracks: smart.tracks, totalDuration: smart.totalDuration };
+            }
+
+            if (!fs.existsSync(playlistPath)) return { tracks: [], totalDuration: 0 };
             const files = await fs.promises.readdir(playlistPath);
             const trackCandidates = files.filter(file => supportedExtensions.includes(path.extname(file).toLowerCase()));
+            let cacheUpdated = false;
+
             const tracks = await Promise.all(trackCandidates.map(async (file) => {
                 const ext = path.extname(file).toLowerCase();
                 const filePath = path.join(playlistPath, file);
-                let duration = 0;
-
-                try {
-                    const metadata = await mm.parseFile(filePath, { duration: true, skipCovers: true });
-                    if (metadata?.format?.duration && Number.isFinite(metadata.format.duration)) {
-                        duration = metadata.format.duration;
-                    }
-                } catch {
-                    duration = 0;
-                }
+                const metadataResult = await getTrackMetadata(filePath, { useCache: isLibraryPerformanceModeEnabled() });
+                cacheUpdated = cacheUpdated || metadataResult.cacheUpdated;
 
                 return {
                     name: path.basename(file, ext),
                     path: filePath,
-                    duration,
+                    duration: metadataResult.metadata.durationSeconds,
                     tags: getTrackTagsForPath(filePath),
                 };
             }));
 
+            if (cacheUpdated) saveMetadataCache();
             const totalDuration = tracks.reduce((sum, track) => sum + (Number.isFinite(track.duration) ? track.duration : 0), 0);
             return { tracks, totalDuration };
         } catch (err) {
@@ -773,26 +793,30 @@ app.whenReady().then(() => {
 
     ipcMain.handle('get-playlist-duration', async (event, playlistPath) => {
         try {
-            if (!playlistPath || !fs.existsSync(playlistPath)) return 0;
-            const files = await fs.promises.readdir(playlistPath);
-            let totalDuration = 0;
-            const promises = [];
-            for (const file of files) {
-                const ext = path.extname(file).toLowerCase();
-                if (supportedExtensions.includes(ext)) {
-                    const filePath = path.join(playlistPath, file);
-                    promises.push(
-                        mm.parseFile(filePath, { duration: true, skipCovers: true })
-                            .then(metadata => {
-                                if (metadata.format && metadata.format.duration) {
-                                    totalDuration += metadata.format.duration;
-                                }
-                            })
-                            .catch(() => {})
-                    );
-                }
+            if (!playlistPath) return 0;
+
+            if (isSmartPlaylistPath(playlistPath)) {
+                const smart = await getSmartPlaylistTracks(playlistPath);
+                if (smart.cacheUpdated) saveMetadataCache();
+                return smart.totalDuration || 0;
             }
-            await Promise.all(promises);
+
+            if (!fs.existsSync(playlistPath)) return 0;
+            const files = await fs.promises.readdir(playlistPath);
+            const trackCandidates = files.filter(file => supportedExtensions.includes(path.extname(file).toLowerCase()));
+            let totalDuration = 0;
+            let cacheUpdated = false;
+
+            await Promise.all(trackCandidates.map(async (file) => {
+                const filePath = path.join(playlistPath, file);
+                const metadataResult = await getTrackMetadata(filePath, { useCache: isLibraryPerformanceModeEnabled() });
+                cacheUpdated = cacheUpdated || metadataResult.cacheUpdated;
+                totalDuration += Number.isFinite(metadataResult.metadata.durationSeconds)
+                    ? metadataResult.metadata.durationSeconds
+                    : 0;
+            }));
+
+            if (cacheUpdated) saveMetadataCache();
             return totalDuration;
         } catch (err) {
             console.error(`Error calculating duration for "${playlistPath}":`, err);
@@ -802,7 +826,29 @@ app.whenReady().then(() => {
 
     ipcMain.handle('get-playlist-details', async (_event, playlistPath) => {
         try {
-            if (!playlistPath || !fs.existsSync(playlistPath)) {
+            if (!playlistPath) {
+                return { success: false, error: 'Playlist folder does not exist.' };
+            }
+
+            if (isSmartPlaylistPath(playlistPath)) {
+                const smart = await getSmartPlaylistTracks(playlistPath);
+                if (smart.cacheUpdated) saveMetadataCache();
+                return {
+                    success: true,
+                    details: {
+                        name: playlistPath === SMART_PLAYLIST_RECENTLY_ADDED ? 'Recently Added' : 'Most Played',
+                        path: playlistPath,
+                        trackCount: smart.tracks.length,
+                        totalDurationSeconds: smart.totalDuration,
+                        totalSizeBytes: 0,
+                        totalSizeFormatted: formatBytes(0),
+                        createdAt: null,
+                        modifiedAt: null,
+                    },
+                };
+            }
+
+            if (!fs.existsSync(playlistPath)) {
                 return { success: false, error: 'Playlist folder does not exist.' };
             }
 
@@ -812,6 +858,7 @@ app.whenReady().then(() => {
 
             let totalDurationSeconds = 0;
             let totalSizeBytes = 0;
+            let cacheUpdated = false;
 
             await Promise.all(trackCandidates.map(async (file) => {
                 const filePath = path.join(playlistPath, file);
@@ -823,15 +870,14 @@ app.whenReady().then(() => {
                     // noop
                 }
 
-                try {
-                    const metadata = await mm.parseFile(filePath, { duration: true, skipCovers: true });
-                    if (metadata?.format?.duration && Number.isFinite(metadata.format.duration)) {
-                        totalDurationSeconds += metadata.format.duration;
-                    }
-                } catch {
-                    // noop
-                }
+                const metadataResult = await getTrackMetadata(filePath, { useCache: isLibraryPerformanceModeEnabled() });
+                cacheUpdated = cacheUpdated || metadataResult.cacheUpdated;
+                totalDurationSeconds += Number.isFinite(metadataResult.metadata.durationSeconds)
+                    ? metadataResult.metadata.durationSeconds
+                    : 0;
             }));
+
+            if (cacheUpdated) saveMetadataCache();
 
             return {
                 success: true,
@@ -925,6 +971,8 @@ app.whenReady().then(() => {
             hideSearchBars: false,
             hideMixButtons: false,
             visualThemeSync: false,
+            enableSmartPlaylists: true,
+            libraryPerformanceMode: true,
             skipManualLinkPrompt: false,
             durationToleranceSeconds: 20,
             silenceTrimThresholdDb: 35,
@@ -995,6 +1043,45 @@ app.whenReady().then(() => {
         }
     });
 
+    ipcMain.handle('update-track-tag', async (_event, { filePath, oldTag, newTag }) => {
+        try {
+            if (!filePath || typeof filePath !== 'string') {
+                return { success: false, error: 'Invalid track path.' };
+            }
+
+            const normalizedOld = typeof oldTag === 'string' ? oldTag.trim().toLowerCase() : '';
+            if (!normalizedOld) {
+                return { success: false, error: 'Original tag is required.' };
+            }
+
+            const existing = getTrackTagsForPath(filePath);
+            const updated = existing.filter(tagValue => tagValue.toLowerCase() !== normalizedOld);
+
+            const nextTag = typeof newTag === 'string' ? newTag.trim() : '';
+            if (nextTag) updated.push(nextTag);
+
+            setTrackTagsForPath(filePath, updated);
+            saveTrackTags();
+            return { success: true, tags: getTrackTagsForPath(filePath) };
+        } catch (error) {
+            return { success: false, error: error.message };
+        }
+    });
+
+    ipcMain.handle('record-track-play', async (_event, filePath) => {
+        try {
+            if (!filePath || typeof filePath !== 'string') {
+                return { success: false, error: 'Invalid track path.' };
+            }
+            const current = Number.isFinite(trackPlayCounts[filePath]) ? trackPlayCounts[filePath] : 0;
+            trackPlayCounts[filePath] = current + 1;
+            saveTrackPlayCounts();
+            return { success: true, playCount: trackPlayCounts[filePath] };
+        } catch (error) {
+            return { success: false, error: error.message };
+        }
+    });
+
     ipcMain.handle('get-track-details', async (_event, filePath) => {
         try {
             if (!filePath || !fs.existsSync(filePath)) {
@@ -1010,10 +1097,16 @@ app.whenReady().then(() => {
             }
 
             const bitrate = metadata?.format?.bitrate;
+            const genre = Array.isArray(metadata?.common?.genre)
+                ? metadata.common.genre.join(', ')
+                : (metadata?.common?.genre || null);
             const details = {
                 path: filePath,
                 fileName: path.basename(filePath),
-                title: path.parse(filePath).name,
+                title: metadata?.common?.title || path.parse(filePath).name,
+                artist: metadata?.common?.artist || metadata?.common?.albumartist || null,
+                album: metadata?.common?.album || null,
+                genre,
                 extension: path.extname(filePath).replace('.', '').toLowerCase(),
                 directory: path.dirname(filePath),
                 playlistName: path.basename(path.dirname(filePath)),
@@ -1022,6 +1115,8 @@ app.whenReady().then(() => {
                 dateDownloaded: (fileStat.birthtime || fileStat.ctime || fileStat.mtime)?.toISOString?.() || null,
                 modifiedAt: fileStat.mtime?.toISOString?.() || null,
                 durationSeconds: Number.isFinite(metadata?.format?.duration) ? metadata.format.duration : null,
+                sampleRate: Number.isFinite(metadata?.format?.sampleRate) ? metadata.format.sampleRate : null,
+                channels: Number.isFinite(metadata?.format?.numberOfChannels) ? metadata.format.numberOfChannels : null,
                 bitrateKbps: Number.isFinite(bitrate) ? Math.round(bitrate / 1000) : null,
                 source: inferTrackSource(filePath, metadata),
                 tags: getTrackTagsForPath(filePath),
@@ -2808,4 +2903,236 @@ function formatBytes(bytes) {
     const exponent = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
     const value = bytes / (1024 ** exponent);
     return `${value.toFixed(value >= 100 || exponent === 0 ? 0 : 1)} ${units[exponent]}`;
+}
+
+function loadMetadataCache() {
+    try {
+        if (fs.existsSync(metadataCachePath)) {
+            const parsed = JSON.parse(fs.readFileSync(metadataCachePath, 'utf-8'));
+            metadataCache = parsed && typeof parsed === 'object' ? parsed : {};
+        } else {
+            metadataCache = {};
+            fs.writeFileSync(metadataCachePath, JSON.stringify(metadataCache, null, 4));
+        }
+    } catch (error) {
+        console.error('Failed to load or create metadata cache file:', error);
+        metadataCache = {};
+    }
+}
+
+function saveMetadataCache() {
+    try {
+        safeWriteFileSync(metadataCachePath, JSON.stringify(metadataCache, null, 4));
+    } catch (error) {
+        console.error('Failed to save metadata cache file:', error);
+    }
+}
+
+function loadTrackPlayCounts() {
+    try {
+        if (fs.existsSync(trackPlayCountsPath)) {
+            const parsed = JSON.parse(fs.readFileSync(trackPlayCountsPath, 'utf-8'));
+            trackPlayCounts = parsed && typeof parsed === 'object' ? parsed : {};
+        } else {
+            trackPlayCounts = {};
+            fs.writeFileSync(trackPlayCountsPath, JSON.stringify(trackPlayCounts, null, 4));
+        }
+    } catch (error) {
+        console.error('Failed to load or create track play counts file:', error);
+        trackPlayCounts = {};
+    }
+}
+
+function saveTrackPlayCounts() {
+    try {
+        safeWriteFileSync(trackPlayCountsPath, JSON.stringify(trackPlayCounts, null, 4));
+    } catch (error) {
+        console.error('Failed to save track play counts file:', error);
+    }
+}
+
+function isSmartPlaylistPath(playlistPath) {
+    return playlistPath === SMART_PLAYLIST_RECENTLY_ADDED || playlistPath === SMART_PLAYLIST_MOST_PLAYED;
+}
+
+function isSmartPlaylistsEnabled() {
+    return config.enableSmartPlaylists !== false;
+}
+
+function isLibraryPerformanceModeEnabled() {
+    return config.libraryPerformanceMode !== false;
+}
+
+async function getTrackStatSafe(filePath) {
+    try {
+        return await fs.promises.stat(filePath);
+    } catch {
+        return null;
+    }
+}
+
+async function getTrackMetadata(filePath, options = {}) {
+    const useCache = options.useCache !== false;
+    const trackStat = await getTrackStatSafe(filePath);
+    if (!trackStat) {
+        return {
+            metadata: {
+                durationSeconds: 0,
+                bitrateKbps: null,
+                artist: null,
+                album: null,
+                genre: null,
+                title: path.parse(filePath).name,
+                source: 'Unknown',
+            },
+            cacheUpdated: false,
+            stat: null,
+        };
+    }
+
+    const cacheKey = filePath;
+    const existing = metadataCache[cacheKey];
+    const cacheValid = Boolean(
+        existing
+        && useCache
+        && existing.mtimeMs === trackStat.mtimeMs
+        && existing.size === trackStat.size
+    );
+
+    if (cacheValid) {
+        return {
+            metadata: {
+                durationSeconds: existing.durationSeconds || 0,
+                bitrateKbps: Number.isFinite(existing.bitrateKbps) ? existing.bitrateKbps : null,
+                artist: existing.artist || null,
+                album: existing.album || null,
+                genre: existing.genre || null,
+                title: existing.title || path.parse(filePath).name,
+                source: existing.source || 'Unknown',
+            },
+            cacheUpdated: false,
+            stat: trackStat,
+        };
+    }
+
+    let parsedMetadata = null;
+    try {
+        parsedMetadata = await mm.parseFile(filePath, { duration: true, skipCovers: true });
+    } catch {
+        parsedMetadata = null;
+    }
+
+    const durationSeconds = Number.isFinite(parsedMetadata?.format?.duration) ? parsedMetadata.format.duration : 0;
+    const bitrateRaw = parsedMetadata?.format?.bitrate;
+    const bitrateKbps = Number.isFinite(bitrateRaw) ? Math.round(bitrateRaw / 1000) : null;
+    const artist = parsedMetadata?.common?.artist || parsedMetadata?.common?.albumartist || null;
+    const album = parsedMetadata?.common?.album || null;
+    const genre = Array.isArray(parsedMetadata?.common?.genre)
+        ? parsedMetadata.common.genre.join(', ')
+        : (parsedMetadata?.common?.genre || null);
+    const title = parsedMetadata?.common?.title || path.parse(filePath).name;
+    const source = inferTrackSource(filePath, parsedMetadata);
+
+    metadataCache[cacheKey] = {
+        mtimeMs: trackStat.mtimeMs,
+        size: trackStat.size,
+        durationSeconds,
+        bitrateKbps,
+        artist,
+        album,
+        genre,
+        title,
+        source,
+    };
+
+    return {
+        metadata: {
+            durationSeconds,
+            bitrateKbps,
+            artist,
+            album,
+            genre,
+            title,
+            source,
+        },
+        cacheUpdated: true,
+        stat: trackStat,
+    };
+}
+
+async function getPhysicalPlaylists(playlistsPath) {
+    if (!playlistsPath || !fs.existsSync(playlistsPath)) return [];
+    const entries = await fs.promises.readdir(playlistsPath, { withFileTypes: true });
+    const directories = entries.filter(entry => entry.isDirectory());
+    return directories.map(entry => ({ name: entry.name, path: path.join(playlistsPath, entry.name), isSmart: false }));
+}
+
+async function getAllTrackEntriesFromLibrary(playlistsPath, options = {}) {
+    const useCache = options.useCache !== false;
+    const playlists = await getPhysicalPlaylists(playlistsPath);
+    const entries = [];
+    let cacheUpdated = false;
+
+    for (const playlist of playlists) {
+        const files = await fs.promises.readdir(playlist.path);
+        const trackFiles = files.filter(file => supportedExtensions.includes(path.extname(file).toLowerCase()));
+
+        for (const file of trackFiles) {
+            const ext = path.extname(file).toLowerCase();
+            const filePath = path.join(playlist.path, file);
+            const metadataResult = await getTrackMetadata(filePath, { useCache });
+            cacheUpdated = cacheUpdated || metadataResult.cacheUpdated;
+            const stat = metadataResult.stat || await getTrackStatSafe(filePath);
+
+            entries.push({
+                name: path.basename(file, ext),
+                path: filePath,
+                playlistPath: playlist.path,
+                playlistName: playlist.name,
+                duration: metadataResult.metadata.durationSeconds,
+                tags: getTrackTagsForPath(filePath),
+                artist: metadataResult.metadata.artist,
+                addedAtMs: stat?.birthtimeMs || stat?.ctimeMs || stat?.mtimeMs || 0,
+                modifiedAtMs: stat?.mtimeMs || 0,
+                playCount: Number.isFinite(trackPlayCounts[filePath]) ? trackPlayCounts[filePath] : 0,
+            });
+        }
+    }
+
+    return { entries, cacheUpdated };
+}
+
+async function getSmartPlaylistTracks(playlistPath) {
+    const playlistsPath = config.playlistsFolderPath;
+    if (!playlistsPath || !fs.existsSync(playlistsPath)) {
+        return { tracks: [], totalDuration: 0, cacheUpdated: false };
+    }
+
+    const { entries, cacheUpdated } = await getAllTrackEntriesFromLibrary(playlistsPath, {
+        useCache: isLibraryPerformanceModeEnabled(),
+    });
+
+    let selectedTracks = [];
+    if (playlistPath === SMART_PLAYLIST_RECENTLY_ADDED) {
+        selectedTracks = entries
+            .sort((a, b) => b.addedAtMs - a.addedAtMs)
+            .slice(0, 200);
+    } else if (playlistPath === SMART_PLAYLIST_MOST_PLAYED) {
+        selectedTracks = entries
+            .filter(track => (track.playCount || 0) > 0)
+            .sort((a, b) => {
+                if (b.playCount !== a.playCount) return b.playCount - a.playCount;
+                return b.modifiedAtMs - a.modifiedAtMs;
+            })
+            .slice(0, 200);
+    }
+
+    const tracks = selectedTracks.map(track => ({
+        name: track.name,
+        path: track.path,
+        duration: track.duration,
+        tags: track.tags,
+    }));
+    const totalDuration = tracks.reduce((sum, track) => sum + (Number.isFinite(track.duration) ? track.duration : 0), 0);
+    return { tracks, totalDuration, cacheUpdated };
 }

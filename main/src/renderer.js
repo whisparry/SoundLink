@@ -98,6 +98,8 @@ window.addEventListener('DOMContentLoaded', () => {
     const hideSearchBarsInput = document.getElementById('hideSearchBars');
     const hideMixButtonsInput = document.getElementById('hideMixButtons');
     const visualThemeSyncInput = document.getElementById('visualThemeSync');
+    const enableSmartPlaylistsInput = document.getElementById('enableSmartPlaylists');
+    const libraryPerformanceModeInput = document.getElementById('libraryPerformanceMode');
     const skipManualLinkPromptInput = document.getElementById('skipManualLinkPrompt');
     const durationToleranceSecondsInput = document.getElementById('durationToleranceSeconds');
     const silenceTrimThresholdDbInput = document.getElementById('silenceTrimThresholdDb');
@@ -397,6 +399,8 @@ window.addEventListener('DOMContentLoaded', () => {
             hideSearchBars: hideSearchBarsInput.checked,
             hideMixButtons: hideMixButtonsInput.checked,
             visualThemeSync: visualThemeSyncInput.checked,
+            enableSmartPlaylists: enableSmartPlaylistsInput.checked,
+            libraryPerformanceMode: libraryPerformanceModeInput.checked,
             skipManualLinkPrompt: skipManualLinkPromptInput.checked,
             durationToleranceSeconds: parseInt(durationToleranceSecondsInput.value, 10),
             silenceTrimThresholdDb: parseInt(silenceTrimThresholdDbInput.value, 10),
@@ -503,6 +507,8 @@ window.addEventListener('DOMContentLoaded', () => {
             hideSearchBarsInput,
             hideMixButtonsInput,
             visualThemeSyncInput,
+            enableSmartPlaylistsInput,
+            libraryPerformanceModeInput,
             updateYtdlpBtn,
             clearCacheBtn,
             spotifyLink,
@@ -1114,6 +1120,8 @@ window.addEventListener('DOMContentLoaded', () => {
             setToggle(hideMixButtonsInput, 'hide-mix-buttons', currentConfig.hideMixButtons || false);
             normalizeVolumeInput.checked = currentConfig.normalizeVolume || false;
             visualThemeSyncInput.checked = currentConfig.visualThemeSync || false;
+            enableSmartPlaylistsInput.checked = currentConfig.enableSmartPlaylists !== false;
+            libraryPerformanceModeInput.checked = currentConfig.libraryPerformanceMode !== false;
             setVisualThemeSyncEnabled(visualThemeSyncInput.checked);
             skipManualLinkPromptInput.checked = currentConfig.skipManualLinkPrompt || false;
             durationToleranceSecondsInput.value = currentConfig.durationToleranceSeconds || 20;
@@ -1122,7 +1130,7 @@ window.addEventListener('DOMContentLoaded', () => {
             const savedPlayerVolume = Number.parseFloat(currentConfig.playerVolume);
             volumeSlider.value = Number.isFinite(savedPlayerVolume) ? Math.min(Math.max(savedPlayerVolume, 0), 1) : 1;
         }
-        [fileExtensionInput, downloadThreadsInput, clientIdInput, clientSecretInput, tabSpeedSlider, dropdownSpeedSlider, themeFadeSlider, autoCreatePlaylistInput, hideRefreshButtonsInput, hidePlaylistCountsInput, hideTrackNumbersInput, normalizeVolumeInput, hideSearchBarsInput, hideMixButtonsInput, visualThemeSyncInput, spotifySearchLimitInput, skipManualLinkPromptInput, durationToleranceSecondsInput, silenceTrimThresholdDbInput].forEach(input => input.addEventListener('change', saveSettings));
+        [fileExtensionInput, downloadThreadsInput, clientIdInput, clientSecretInput, tabSpeedSlider, dropdownSpeedSlider, themeFadeSlider, autoCreatePlaylistInput, hideRefreshButtonsInput, hidePlaylistCountsInput, hideTrackNumbersInput, normalizeVolumeInput, hideSearchBarsInput, hideMixButtonsInput, visualThemeSyncInput, enableSmartPlaylistsInput, libraryPerformanceModeInput, spotifySearchLimitInput, skipManualLinkPromptInput, durationToleranceSecondsInput, silenceTrimThresholdDbInput].forEach(input => input.addEventListener('change', saveSettings));
         hideRefreshButtonsInput.addEventListener('change', () => body.classList.toggle('hide-refresh-buttons', hideRefreshButtonsInput.checked));
         hidePlaylistCountsInput.addEventListener('change', () => body.classList.toggle('hide-playlist-counts', hidePlaylistCountsInput.checked));
         hideTrackNumbersInput.addEventListener('change', () => body.classList.toggle('hide-track-numbers', hideTrackNumbersInput.checked));
@@ -1425,6 +1433,8 @@ window.addEventListener('DOMContentLoaded', () => {
         setToggle(hideTrackNumbersInput, 'hide-track-numbers', defaultSettings.hideTrackNumbers || false);
         setToggle(hideSearchBarsInput, 'hide-search-bars', defaultSettings.hideSearchBars || false);
         setToggle(hideMixButtonsInput, 'hide-mix-buttons', defaultSettings.hideMixButtons || false);
+        enableSmartPlaylistsInput.checked = defaultSettings.enableSmartPlaylists !== false;
+        libraryPerformanceModeInput.checked = defaultSettings.libraryPerformanceMode !== false;
         skipManualLinkPromptInput.checked = defaultSettings.skipManualLinkPrompt || false;
         durationToleranceSecondsInput.value = defaultSettings.durationToleranceSeconds || 20;
         silenceTrimThresholdDbInput.value = defaultSettings.silenceTrimThresholdDb || 35;

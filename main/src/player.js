@@ -154,6 +154,9 @@ function playTrack(index) {
             path: track.path,
         });
         audio.src = track.path;
+        window.electronAPI.recordTrackPlay(track.path).catch(() => {
+            // noop
+        });
         play();
         updateNowPlaying();
         highlightCurrentTrack();
@@ -814,10 +817,15 @@ function buildTrackDetailsMessage(details) {
     const tagText = Array.isArray(details.tags) && details.tags.length > 0 ? details.tags.join(', ') : 'None';
     return [
         `Title: ${details.title || details.fileName || 'Unknown'}`,
+        `Artist: ${details.artist || 'Unknown'}`,
+        `Album: ${details.album || 'Unknown'}`,
+        `Genre: ${details.genre || 'Unknown'}`,
         `Source: ${details.source || 'Unknown'}`,
         `Date downloaded: ${formatTrackDetailsDate(details.dateDownloaded)}`,
         `Duration: ${formatTrackDetailsDuration(details.durationSeconds)}`,
         `Bitrate: ${Number.isFinite(details.bitrateKbps) ? `${details.bitrateKbps} kbps` : 'Unknown'}`,
+        `Sample rate: ${Number.isFinite(details.sampleRate) ? `${details.sampleRate} Hz` : 'Unknown'}`,
+        `Channels: ${Number.isFinite(details.channels) ? details.channels : 'Unknown'}`,
         `Size: ${details.sizeFormatted || 'Unknown'}`,
         `Tags: ${tagText}`,
         '',
@@ -854,6 +862,37 @@ async function addTagToTrackFromContext(track) {
     }
 
     ctx.helpers.showNotification('success', 'Tag Added', `"${trimmedTag}" added to "${track.displayName}".`);
+    await renderActiveTracks({ autoplayFirstTrack: false, preserveCurrentTrack: true });
+}
+
+async function editTagOnTrackFromContext(track) {
+    const existingTags = Array.isArray(track.tags) ? track.tags : [];
+    if (existingTags.length === 0) return;
+
+    const currentTag = existingTags[0];
+    const tagInput = await ctx.helpers.showPromptDialog(
+        'Edit Tag',
+        'Edit the tag text, or leave empty to remove it.',
+        currentTag,
+        { confirmText: 'Save Tag', cancelText: 'Cancel', placeholder: 'Tag text' }
+    );
+
+    if (tagInput === null) return;
+
+    const result = await window.electronAPI.updateTrackTag({
+        filePath: track.path,
+        oldTag: currentTag,
+        newTag: tagInput,
+    });
+
+    if (!result?.success) {
+        ctx.helpers.showNotification('error', 'Edit Tag Failed', result?.error || 'Could not update tag.');
+        return;
+    }
+
+    const wasRemoved = !(typeof tagInput === 'string' && tagInput.trim());
+    ctx.helpers.showNotification('success', wasRemoved ? 'Tag Removed' : 'Tag Updated', wasRemoved ? `Removed "${currentTag}".` : `Updated to "${tagInput.trim()}".`);
+    await renderActiveTracks({ autoplayFirstTrack: false, preserveCurrentTrack: true });
 }
 
 async function goToTrackFileFromContext(track) {
@@ -965,9 +1004,20 @@ function renderTracklistUI() {
         return;
     }
 
+    const query = playerState.trackSearchQuery.trim().toLowerCase();
     const filteredTracks = currentTracklist
         .map((track, index) => ({ track, index }))
-        .filter(({ track }) => track.displayName.toLowerCase().includes(playerState.trackSearchQuery));
+        .filter(({ track }) => {
+            if (!query) return true;
+            const tagList = Array.isArray(track.tags) ? track.tags : [];
+            const tagsMatch = tagList.some(tag => tag.toLowerCase().includes(query));
+            if (query.startsWith('tag:')) {
+                const tagQuery = query.slice(4).trim();
+                if (!tagQuery) return tagList.length > 0;
+                return tagList.some(tag => tag.toLowerCase().includes(tagQuery));
+            }
+            return track.displayName.toLowerCase().includes(query) || tagsMatch;
+        });
 
     filteredTracks.forEach(({ track, index }) => {
         const item = document.createElement('div');
@@ -1016,6 +1066,15 @@ function renderTracklistUI() {
                     action: () => window.electronAPI.showInExplorer(track.path),
                 },
             ];
+
+            if (Array.isArray(track.tags) && track.tags.length > 0) {
+                menuItems.splice(4, 0, {
+                    label: 'Edit tag',
+                    action: async () => {
+                        await editTagOnTrackFromContext(track);
+                    },
+                });
+            }
 
             menuItems.push(
                 { type: 'separator' },
@@ -1218,6 +1277,7 @@ async function renderPlaylists() {
             item.addEventListener('contextmenu', (event) => {
                 event.preventDefault();
                 const isInMix = playerState.activePlaylistIds.includes(p.path);
+                const isSmartPlaylist = Boolean(p.isSmart);
                 const menuItems = [
                     {
                         label: isInMix ? 'Remove from Mix' : 'Add to Mix',
@@ -1231,25 +1291,30 @@ async function renderPlaylists() {
                             await showPlaylistInfoFromContext(p);
                         },
                     },
-                    { type: 'separator' },
-                    {
-                        label: 'Rename',
-                        action: async () => {
-                            await renamePlaylistFromContext(p);
-                        },
-                    },
-                    {
-                        label: 'Delete',
-                        action: async () => {
-                            await deletePlaylistFromContext(p);
-                        },
-                    },
-                    { type: 'separator' },
-                    {
-                        label: 'Show in Folder',
-                        action: () => window.electronAPI.showInExplorer(p.path),
-                    },
                 ];
+
+                if (!isSmartPlaylist) {
+                    menuItems.push(
+                        { type: 'separator' },
+                        {
+                            label: 'Rename',
+                            action: async () => {
+                                await renamePlaylistFromContext(p);
+                            },
+                        },
+                        {
+                            label: 'Delete',
+                            action: async () => {
+                                await deletePlaylistFromContext(p);
+                            },
+                        },
+                        { type: 'separator' },
+                        {
+                            label: 'Show in Folder',
+                            action: () => window.electronAPI.showInExplorer(p.path),
+                        },
+                    );
+                }
 
                 ctx.helpers.showContextMenu(event.clientX, event.clientY, menuItems);
             });
