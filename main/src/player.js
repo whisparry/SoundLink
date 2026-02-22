@@ -504,6 +504,7 @@ function updateSleepTimerDisplay() {
 }
 
 function showSleepTimerMenu(event) {
+    event.stopPropagation();
     const menuItems = [
         { label: '15 minutes', action: () => setSleepTimer(15) },
         { label: '30 minutes', action: () => setSleepTimer(30) },
@@ -512,7 +513,9 @@ function showSleepTimerMenu(event) {
         { type: 'separator' },
         { label: 'Cancel Timer', action: () => setSleepTimer(0) }
     ];
-    ctx.helpers.showContextMenu(event.clientX, event.clientY, menuItems);
+    
+    const rect = event.currentTarget.getBoundingClientRect();
+    ctx.helpers.showContextMenu(rect.left, rect.top - 200, menuItems);
 }
 
 // --- Playlist & Track Rendering ---
