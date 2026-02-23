@@ -898,7 +898,21 @@ window.addEventListener('DOMContentLoaded', () => {
     });
 
     // --- Title Bar Logic ---
-    if (closeBtn) closeBtn.addEventListener('click', () => window.electronAPI.closeApp());
+    if (closeBtn) {
+        let isClosing = false;
+        closeBtn.addEventListener('click', () => {
+            if (isClosing) return;
+            isClosing = true;
+            body.classList.add('app-closing');
+            setTimeout(() => {
+                window.electronAPI.closeApp();
+            }, 240);
+            setTimeout(() => {
+                body.classList.remove('app-closing');
+                isClosing = false;
+            }, 900);
+        });
+    }
 
     // --- Settings Logic ---
     changePathBtn.addEventListener('click', async () => {

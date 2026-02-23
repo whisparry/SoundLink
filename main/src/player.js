@@ -138,6 +138,25 @@ function updateNowPlaying() {
     } else {
         nowPlaying.textContent = 'Select a song to play';
     }
+
+    emitPlayerStateUpdate();
+}
+
+function emitPlayerStateUpdate() {
+    const currentTrack = currentTracklist[currentTrackIndex] || null;
+    const playlistName = currentTrack ? getPlaylistNameByPath(currentTrack.playlistPath) : '—';
+
+    window.electronAPI?.updatePlayerState?.({
+        isPlaying: !audio.paused && Boolean(audio.src),
+        trackName: currentTrack?.displayName || 'Nothing playing',
+        playlistName,
+        currentTimeSeconds: Number.isFinite(audio.currentTime) ? audio.currentTime : 0,
+        durationSeconds: Number.isFinite(audio.duration) ? audio.duration : 0,
+        sleepTimerActive: Boolean(sleepTimerEndTime),
+        sleepTimerRemainingSeconds: sleepTimerEndTime
+            ? Math.max(0, Math.ceil((sleepTimerEndTime - Date.now()) / 1000))
+            : 0,
+    });
 }
 
 // --- Player Actions ---
@@ -173,6 +192,13 @@ function play() {
 function pause() {
     log('Audio pause requested');
     audio.pause();
+}
+
+function stopPlayback() {
+    pause();
+    audio.currentTime = 0;
+    updateUI();
+    emitPlayerStateUpdate();
 }
 
 function togglePlayPause() {
@@ -478,6 +504,7 @@ function resetPlaybackState() {
     currentTrackIndex = -1;
     updatePlayPauseButton(false);
     updateNowPlaying();
+    emitPlayerStateUpdate();
 }
 
 function setSleepTimer(minutes) {
@@ -493,6 +520,7 @@ function setSleepTimer(minutes) {
         sleepTimerDisplay.classList.add('hidden');
         sleepTimerBtn.classList.remove('active');
         log('Sleep timer cancelled');
+        emitPlayerStateUpdate();
         return;
     }
     
@@ -511,6 +539,7 @@ function setSleepTimer(minutes) {
             sleepTimerBtn.classList.remove('active');
             pause();
             log('Sleep timer finished, playback paused');
+            emitPlayerStateUpdate();
         }
     }, 1000);
     
@@ -522,6 +551,7 @@ function updateSleepTimerDisplay() {
     const remaining = Math.max(0, Math.ceil((sleepTimerEndTime - Date.now()) / 1000));
     const { sleepTimerDisplay } = ctx.elements;
     sleepTimerDisplay.textContent = formatTime(remaining);
+    emitPlayerStateUpdate();
 }
 
 function showSleepTimerMenu(event) {
@@ -1197,10 +1227,19 @@ async function setActivePlaylists(nextIds, options = {}) {
 
 function highlightCurrentTrack() {
     const { playerTracksContainer } = ctx.elements;
+    let activeTrackElement = null;
     playerTracksContainer.querySelectorAll('.player-track-item').forEach((item) => {
         const trackIndex = Number.parseInt(item.dataset.trackIndex, 10);
-        item.classList.toggle('playing', trackIndex === currentTrackIndex);
+        const isPlayingTrack = trackIndex === currentTrackIndex;
+        item.classList.toggle('playing', isPlayingTrack);
+        if (isPlayingTrack) {
+            activeTrackElement = item;
+        }
     });
+
+    if (activeTrackElement) {
+        activeTrackElement.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
 }
 
 async function renderPlaylists() {
@@ -1425,15 +1464,23 @@ export function initializePlayer(context) {
         if (ctx.state?.visualThemeSync) {
             startVisualThemeSyncLoop();
         }
+        emitPlayerStateUpdate();
     });
     audio.addEventListener('pause', () => {
         logDebug('Audio pause event');
         updatePlayPauseButton(false);
         stopVisualThemeSyncLoop();
         resetVisualSyncState();
+        emitPlayerStateUpdate();
     });
-    audio.addEventListener('timeupdate', updateUI);
-    audio.addEventListener('loadedmetadata', updateUI);
+    audio.addEventListener('timeupdate', () => {
+        updateUI();
+        emitPlayerStateUpdate();
+    });
+    audio.addEventListener('loadedmetadata', () => {
+        updateUI();
+        emitPlayerStateUpdate();
+    });
     audio.addEventListener('ended', () => {
         logDebug('Audio ended event');
         stopVisualThemeSyncLoop();
@@ -1462,6 +1509,20 @@ export function initializePlayer(context) {
     shuffleBtn.addEventListener('click', toggleShuffle);
     repeatBtn.addEventListener('click', cycleRepeat);
     sleepTimerBtn.addEventListener('click', showSleepTimerMenu);
+
+    window.electronAPI.onTrayPlaybackCommand(({ command }) => {
+        if (command === 'play') {
+            togglePlayPause();
+        } else if (command === 'stop') {
+            stopPlayback();
+        }
+    });
+
+    window.electronAPI.onTraySleepTimerCommand(({ minutes }) => {
+        const requestedMinutes = Number.parseInt(minutes, 10);
+        if (!Number.isFinite(requestedMinutes) || requestedMinutes < 0) return;
+        setSleepTimer(requestedMinutes);
+    });
 
     playerPlaylistSearchInput.addEventListener('input', (e) => {
         playerState.playlistSearchQuery = e.target.value.trim().toLowerCase();
@@ -1493,6 +1554,7 @@ export function initializePlayer(context) {
         });
     updatePlayPauseButton(false);
     updateNowPlaying();
+    emitPlayerStateUpdate();
 
     ctx.state.isPlayerInitialized = true;
     log('Player initialized successfully');

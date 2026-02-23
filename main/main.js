@@ -82,6 +82,15 @@ let cachedNodeRuntimePath = undefined;
 let manualLinkRequestCounter = 0;
 const pendingManualLinkRequests = new Map();
 const activeSilenceTrimJobs = new Map();
+let trayPlaybackState = {
+    isPlaying: false,
+    trackName: 'Nothing playing',
+    playlistName: '—',
+    durationSeconds: 0,
+    currentTimeSeconds: 0,
+    sleepTimerActive: false,
+    sleepTimerRemainingSeconds: 0,
+};
 
 const SMART_PLAYLIST_RECENTLY_ADDED = '__smart__/recently-added';
 const SMART_PLAYLIST_MOST_PLAYED = '__smart__/most-played';
@@ -700,18 +709,7 @@ app.whenReady().then(() => {
 
     try {
         tray = new Tray(trayIconPath);
-        const contextMenu = Menu.buildFromTemplate([
-            { label: 'Show App', click: () => mainWindow.show() },
-            { 
-                label: 'Quit', 
-                click: () => {
-                    app.isQuitting = true;
-                    app.quit();
-                } 
-            }
-        ]);
-        tray.setToolTip('SoundLink');
-        tray.setContextMenu(contextMenu);
+        refreshTrayContextMenu();
         tray.on('click', () => {
             writeLog('debug', 'Tray', 'Tray icon clicked');
             mainWindow.show();
@@ -925,6 +923,26 @@ app.whenReady().then(() => {
             cancelled: Boolean(payload.cancelled),
             link: manualLink,
         });
+    });
+
+    ipcMain.on('player-state-update', (_event, payload = {}) => {
+        const currentTimeSeconds = Number.parseFloat(payload.currentTimeSeconds);
+        const durationSeconds = Number.parseFloat(payload.durationSeconds);
+        const sleepTimerRemainingSeconds = Number.parseInt(payload.sleepTimerRemainingSeconds, 10);
+
+        trayPlaybackState = {
+            isPlaying: Boolean(payload.isPlaying),
+            trackName: sanitizeTrayText(payload.trackName, 'Nothing playing'),
+            playlistName: sanitizeTrayText(payload.playlistName, '—'),
+            durationSeconds: Number.isFinite(durationSeconds) && durationSeconds >= 0 ? durationSeconds : 0,
+            currentTimeSeconds: Number.isFinite(currentTimeSeconds) && currentTimeSeconds >= 0 ? currentTimeSeconds : 0,
+            sleepTimerActive: Boolean(payload.sleepTimerActive),
+            sleepTimerRemainingSeconds: Number.isFinite(sleepTimerRemainingSeconds) && sleepTimerRemainingSeconds >= 0
+                ? sleepTimerRemainingSeconds
+                : 0,
+        };
+
+        refreshTrayContextMenu();
     });
 
     ipcMain.handle('reset-stats', () => {
@@ -2251,20 +2269,33 @@ app.whenReady().then(() => {
     }
 
     async function resolveTrackLink(query, trackName, expectedDurationMs) {
+        const cacheKey = query.trim().toLowerCase();
+        const cachedLink = linkCache[cacheKey] || linkCache[query];
+        if (cachedLink) {
+            mainWindow.webContents.send('update-status', `⚡ [Cache] Using cached link for: ${trackName}`);
+            return { link: cachedLink, source: 'cache' };
+        }
+
         const youtubeMatch = await searchCandidates('ytsearch', query, expectedDurationMs);
         if (youtubeMatch) {
+            linkCache[cacheKey] = youtubeMatch.url;
+            saveCache();
             return { link: youtubeMatch.url, source: 'youtube' };
         }
 
         mainWindow.webContents.send('update-status', `⚠️ No duration-matching YouTube result for: ${trackName}. Trying SoundCloud...`);
         const soundCloudMatch = await searchCandidates('scsearch', query, expectedDurationMs);
         if (soundCloudMatch) {
+            linkCache[cacheKey] = soundCloudMatch.url;
+            saveCache();
             return { link: soundCloudMatch.url, source: 'soundcloud' };
         }
 
         mainWindow.webContents.send('update-status', `⚠️ No duration-matching SoundCloud result for: ${trackName}.`);
         const manualLink = await requestManualLink(trackName, query);
         if (manualLink) {
+            linkCache[cacheKey] = manualLink;
+            saveCache();
             return { link: manualLink, source: 'manual' };
         }
 
@@ -3135,4 +3166,89 @@ async function getSmartPlaylistTracks(playlistPath) {
     }));
     const totalDuration = tracks.reduce((sum, track) => sum + (Number.isFinite(track.duration) ? track.duration : 0), 0);
     return { tracks, totalDuration, cacheUpdated };
+}
+
+function formatDurationClock(totalSeconds) {
+    const safeSeconds = Number.isFinite(totalSeconds) && totalSeconds > 0
+        ? Math.floor(totalSeconds)
+        : 0;
+    const hours = Math.floor(safeSeconds / 3600);
+    const minutes = Math.floor((safeSeconds % 3600) / 60);
+    const seconds = safeSeconds % 60;
+
+    if (hours > 0) {
+        return `${hours}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+    }
+
+    return `${minutes}:${String(seconds).padStart(2, '0')}`;
+}
+
+function sanitizeTrayText(value, fallback = '—') {
+    if (typeof value !== 'string') return fallback;
+    const trimmed = value.trim();
+    if (!trimmed) return fallback;
+    return trimmed.length > 72 ? `${trimmed.slice(0, 69)}...` : trimmed;
+}
+
+function sendTrayCommandToRenderer(channel, payload = {}) {
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    mainWindow.webContents.send(channel, payload);
+}
+
+function buildTrayContextMenuTemplate() {
+    const trackName = sanitizeTrayText(trayPlaybackState.trackName, 'Nothing playing');
+    const playlistName = sanitizeTrayText(trayPlaybackState.playlistName, '—');
+    const progressText = `${formatDurationClock(trayPlaybackState.currentTimeSeconds)} / ${formatDurationClock(trayPlaybackState.durationSeconds)}`;
+    const sleepTimerText = trayPlaybackState.sleepTimerActive
+        ? `⏳ Sleep Timer: ${formatDurationClock(trayPlaybackState.sleepTimerRemainingSeconds)} remaining`
+        : '⏳ Sleep Timer: Off';
+
+    return [
+        { label: 'Show App', click: () => mainWindow?.show() },
+        { type: 'separator' },
+        {
+            label: 'Playback Controls',
+            submenu: [
+                { label: '▶ Play', click: () => sendTrayCommandToRenderer('tray-playback-command', { command: 'play' }) },
+                { label: '⏹ Stop', click: () => sendTrayCommandToRenderer('tray-playback-command', { command: 'stop' }) },
+            ],
+        },
+        {
+            label: 'Sleep Timer',
+            submenu: [
+                { label: '15 minutes', click: () => sendTrayCommandToRenderer('tray-sleep-timer-command', { minutes: 15 }) },
+                { label: '30 minutes', click: () => sendTrayCommandToRenderer('tray-sleep-timer-command', { minutes: 30 }) },
+                { label: '45 minutes', click: () => sendTrayCommandToRenderer('tray-sleep-timer-command', { minutes: 45 }) },
+                { label: '60 minutes', click: () => sendTrayCommandToRenderer('tray-sleep-timer-command', { minutes: 60 }) },
+                { type: 'separator' },
+                { label: 'Cancel Timer', click: () => sendTrayCommandToRenderer('tray-sleep-timer-command', { minutes: 0 }) },
+            ],
+        },
+        { type: 'separator' },
+        { label: `♫ ${trackName}`, enabled: false },
+        { label: `📁 ${playlistName}`, enabled: false },
+        { label: `⏱ ${progressText}`, enabled: false },
+        { label: sleepTimerText, enabled: false },
+        { type: 'separator' },
+        {
+            label: 'Quit',
+            click: () => {
+                app.isQuitting = true;
+                app.quit();
+            },
+        },
+    ];
+}
+
+function refreshTrayContextMenu() {
+    if (!tray) return;
+    const contextMenu = Menu.buildFromTemplate(buildTrayContextMenuTemplate());
+    tray.setContextMenu(contextMenu);
+
+    const tooltipTrack = sanitizeTrayText(trayPlaybackState.trackName, 'Nothing playing');
+    const tooltipSleep = trayPlaybackState.sleepTimerActive
+        ? `Sleep ${formatDurationClock(trayPlaybackState.sleepTimerRemainingSeconds)}`
+        : 'Sleep Off';
+    const tooltipPrefix = trayPlaybackState.isPlaying ? 'Playing' : 'Paused';
+    tray.setToolTip(`SoundLink • ${tooltipPrefix}\n${tooltipTrack}\n${tooltipSleep}`);
 }

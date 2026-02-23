@@ -48,6 +48,18 @@ body {
     grid-template-rows: 1fr;
 }
 
+body.app-closing {
+    pointer-events: none;
+}
+
+body.app-closing .title-bar,
+body.app-closing .container,
+body.app-closing .toast-notification {
+    opacity: 0;
+    transform: translateY(4px) scale(0.99);
+    transition: opacity 220ms ease, transform 220ms ease;
+}
+
 h1 {
     color: var(--text-primary);
     border-bottom: none;
