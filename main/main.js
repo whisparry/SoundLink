@@ -236,6 +236,9 @@ function loadConfig() {
             if (!Number.isFinite(Number.parseFloat(config.playerVolume))) {
                 config.playerVolume = 1;
             }
+            if (typeof config.spectrogramColor !== 'string' || !/^#[\da-f]{6}$/i.test(config.spectrogramColor)) {
+                config.spectrogramColor = '#3b82f6';
+            }
         } else {
             config = { 
                 theme: 'dark',
@@ -260,6 +263,7 @@ function loadConfig() {
                 durationToleranceSeconds: 20,
                 silenceTrimThresholdDb: 35,
                 playerVolume: 1,
+                spectrogramColor: '#3b82f6',
                 playlistsFolderPath: ''
             };
             fs.writeFileSync(configPath, JSON.stringify(config, null, 4));
@@ -1000,6 +1004,7 @@ app.whenReady().then(() => {
             durationToleranceSeconds: 20,
             silenceTrimThresholdDb: 35,
             playerVolume: 1,
+            spectrogramColor: '#3b82f6',
         };
     });
 

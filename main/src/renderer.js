@@ -98,6 +98,7 @@ window.addEventListener('DOMContentLoaded', () => {
     const hideSearchBarsInput = document.getElementById('hideSearchBars');
     const hideMixButtonsInput = document.getElementById('hideMixButtons');
     const visualThemeSyncInput = document.getElementById('visualThemeSync');
+    const spectrogramColorInput = document.getElementById('spectrogramColor');
     const enableSmartPlaylistsInput = document.getElementById('enableSmartPlaylists');
     const libraryPerformanceModeInput = document.getElementById('libraryPerformanceMode');
     const skipManualLinkPromptInput = document.getElementById('skipManualLinkPrompt');
@@ -186,6 +187,7 @@ window.addEventListener('DOMContentLoaded', () => {
         activeSilenceTrimJobId: null,
         lastSilenceTrimProgressTick: 0,
         visualThemeSync: false,
+        spectrogramColor: '#3b82f6',
     };
 
     // --- Helper Functions ---
@@ -404,6 +406,7 @@ window.addEventListener('DOMContentLoaded', () => {
             hideSearchBars: hideSearchBarsInput.checked,
             hideMixButtons: hideMixButtonsInput.checked,
             visualThemeSync: visualThemeSyncInput.checked,
+            spectrogramColor: spectrogramColorInput.value,
             enableSmartPlaylists: enableSmartPlaylistsInput.checked,
             libraryPerformanceMode: libraryPerformanceModeInput.checked,
             skipManualLinkPrompt: skipManualLinkPromptInput.checked,
@@ -512,6 +515,7 @@ window.addEventListener('DOMContentLoaded', () => {
             hideSearchBarsInput,
             hideMixButtonsInput,
             visualThemeSyncInput,
+            spectrogramColorInput,
             enableSmartPlaylistsInput,
             libraryPerformanceModeInput,
             updateYtdlpBtn,
@@ -1063,12 +1067,22 @@ window.addEventListener('DOMContentLoaded', () => {
         root.style.setProperty('--audio-spectrogram-rgb', `${tintColor[0]}, ${tintColor[1]}, ${tintColor[2]}`);
     }
 
+    function applySpectrogramColorFromHex(hexColor) {
+        const rgb = parseHexColor(hexColor);
+        if (!rgb) return false;
+        root.style.setProperty('--audio-spectrogram-rgb', `${rgb[0]}, ${rgb[1]}, ${rgb[2]}`);
+        return true;
+    }
+
     function applyTheme(themeName) {
         const theme = themeColors[themeName];
         if (!theme) return;
         logTab('Settings', 'theme applied', { themeName });
         for (const [key, value] of Object.entries(theme)) root.style.setProperty(key, value);
         updateSpectrogramTint(theme);
+        if (state.spectrogramColor) {
+            applySpectrogramColorFromHex(state.spectrogramColor);
+        }
         state.currentThemeName = themeName;
         document.querySelectorAll('.theme-button').forEach(btn => btn.classList.toggle('active', btn.dataset.theme === themeName));
     }
@@ -1114,6 +1128,9 @@ window.addEventListener('DOMContentLoaded', () => {
             downloadThreadsInput.disabled = true;
         }
         if (currentConfig) {
+            state.spectrogramColor = (typeof currentConfig.spectrogramColor === 'string' && /^#[\da-f]{6}$/i.test(currentConfig.spectrogramColor))
+                ? currentConfig.spectrogramColor
+                : '#3b82f6';
             applyTheme(currentConfig.theme || 'dark');
             state.favoriteThemes = currentConfig.favoriteThemes || [];
             state.favoritePlaylists = currentConfig.favoritePlaylists || [];
@@ -1144,6 +1161,8 @@ window.addEventListener('DOMContentLoaded', () => {
             setToggle(hideMixButtonsInput, 'hide-mix-buttons', currentConfig.hideMixButtons || false);
             normalizeVolumeInput.checked = currentConfig.normalizeVolume || false;
             visualThemeSyncInput.checked = currentConfig.visualThemeSync || false;
+            spectrogramColorInput.value = state.spectrogramColor;
+            applySpectrogramColorFromHex(state.spectrogramColor);
             enableSmartPlaylistsInput.checked = currentConfig.enableSmartPlaylists !== false;
             libraryPerformanceModeInput.checked = currentConfig.libraryPerformanceMode !== false;
             setVisualThemeSyncEnabled(visualThemeSyncInput.checked);
@@ -1154,13 +1173,17 @@ window.addEventListener('DOMContentLoaded', () => {
             const savedPlayerVolume = Number.parseFloat(currentConfig.playerVolume);
             volumeSlider.value = Number.isFinite(savedPlayerVolume) ? Math.min(Math.max(savedPlayerVolume, 0), 1) : 1;
         }
-        [fileExtensionInput, downloadThreadsInput, clientIdInput, clientSecretInput, tabSpeedSlider, dropdownSpeedSlider, themeFadeSlider, autoCreatePlaylistInput, hideRefreshButtonsInput, hidePlaylistCountsInput, hideTrackNumbersInput, normalizeVolumeInput, hideSearchBarsInput, hideMixButtonsInput, visualThemeSyncInput, enableSmartPlaylistsInput, libraryPerformanceModeInput, spotifySearchLimitInput, skipManualLinkPromptInput, durationToleranceSecondsInput, silenceTrimThresholdDbInput].forEach(input => input.addEventListener('change', saveSettings));
+        [fileExtensionInput, downloadThreadsInput, clientIdInput, clientSecretInput, tabSpeedSlider, dropdownSpeedSlider, themeFadeSlider, autoCreatePlaylistInput, hideRefreshButtonsInput, hidePlaylistCountsInput, hideTrackNumbersInput, normalizeVolumeInput, hideSearchBarsInput, hideMixButtonsInput, visualThemeSyncInput, spectrogramColorInput, enableSmartPlaylistsInput, libraryPerformanceModeInput, spotifySearchLimitInput, skipManualLinkPromptInput, durationToleranceSecondsInput, silenceTrimThresholdDbInput].forEach(input => input.addEventListener('change', saveSettings));
         hideRefreshButtonsInput.addEventListener('change', () => body.classList.toggle('hide-refresh-buttons', hideRefreshButtonsInput.checked));
         hidePlaylistCountsInput.addEventListener('change', () => body.classList.toggle('hide-playlist-counts', hidePlaylistCountsInput.checked));
         hideTrackNumbersInput.addEventListener('change', () => body.classList.toggle('hide-track-numbers', hideTrackNumbersInput.checked));
         hideSearchBarsInput.addEventListener('change', () => body.classList.toggle('hide-search-bars', hideSearchBarsInput.checked));
         hideMixButtonsInput.addEventListener('change', () => body.classList.toggle('hide-mix-buttons', hideMixButtonsInput.checked));
         visualThemeSyncInput.addEventListener('change', () => setVisualThemeSyncEnabled(visualThemeSyncInput.checked));
+        spectrogramColorInput.addEventListener('input', () => {
+            state.spectrogramColor = spectrogramColorInput.value;
+            applySpectrogramColorFromHex(state.spectrogramColor);
+        });
         downloadThreadsInput.addEventListener('input', () => {
             const max = parseInt(downloadThreadsInput.max, 10), min = parseInt(downloadThreadsInput.min, 10);
             let value = parseInt(downloadThreadsInput.value, 10);
@@ -1459,6 +1482,11 @@ window.addEventListener('DOMContentLoaded', () => {
         setToggle(hideMixButtonsInput, 'hide-mix-buttons', defaultSettings.hideMixButtons || false);
         enableSmartPlaylistsInput.checked = defaultSettings.enableSmartPlaylists !== false;
         libraryPerformanceModeInput.checked = defaultSettings.libraryPerformanceMode !== false;
+        state.spectrogramColor = (typeof defaultSettings.spectrogramColor === 'string' && /^#[\da-f]{6}$/i.test(defaultSettings.spectrogramColor))
+            ? defaultSettings.spectrogramColor
+            : '#3b82f6';
+        spectrogramColorInput.value = state.spectrogramColor;
+        applySpectrogramColorFromHex(state.spectrogramColor);
         skipManualLinkPromptInput.checked = defaultSettings.skipManualLinkPrompt || false;
         durationToleranceSecondsInput.value = defaultSettings.durationToleranceSeconds || 20;
         silenceTrimThresholdDbInput.value = defaultSettings.silenceTrimThresholdDb || 35;

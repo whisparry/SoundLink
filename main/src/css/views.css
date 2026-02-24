@@ -743,6 +743,29 @@ input[type=range]::-moz-range-thumb {
     min-height: 0;
     height: 100%;
     overflow: hidden;
+    position: relative;
+}
+
+.player-content-area::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    z-index: 0;
+    border-radius: 12px;
+    opacity: 0;
+    background:
+        radial-gradient(
+            100% 160% at 50% 100%,
+            rgba(var(--audio-spectrogram-rgb), calc(0.06 + (var(--audio-visual-level) * 0.12))) 0%,
+            rgba(var(--audio-spectrogram-rgb), 0.02) 58%,
+            rgba(var(--audio-spectrogram-rgb), 0) 100%
+        );
+    transition: opacity 0.2s ease;
+}
+
+body.audio-visual-sync-enabled.audio-visual-sync-active .player-content-area::before {
+    opacity: 1;
 }
 
 #player-view {
@@ -764,6 +787,35 @@ input[type=range]::-moz-range-thumb {
     min-width: 0;
     min-height: 0;
     overflow: hidden;
+}
+
+.player-playlists-panel,
+.player-tracks-panel {
+    position: relative;
+    z-index: 1;
+}
+
+.player-playlists-panel::before,
+.player-tracks-panel::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    z-index: 0;
+    background:
+        linear-gradient(
+            180deg,
+            rgba(255, 255, 255, calc(0.05 + (var(--audio-visual-level) * 0.10))) 0%,
+            rgba(var(--audio-spectrogram-rgb), calc(0.05 + (var(--audio-visual-level) * 0.12))) 100%
+        );
+    backdrop-filter: blur(calc(8px + (var(--audio-visual-level) * 8px)));
+    -webkit-backdrop-filter: blur(calc(8px + (var(--audio-visual-level) * 8px)));
+}
+
+.player-playlists-panel > *,
+.player-tracks-panel > * {
+    position: relative;
+    z-index: 1;
 }
 
 .pm-playlists-panel, .player-playlists-panel {
