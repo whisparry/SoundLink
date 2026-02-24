@@ -152,6 +152,11 @@ window.addEventListener('DOMContentLoaded', () => {
     const appDialogInput = document.getElementById('app-dialog-input');
     const appDialogConfirmBtn = document.getElementById('app-dialog-confirm-btn');
     const appDialogCancelBtn = document.getElementById('app-dialog-cancel-btn');
+    const mixDetailsModal = document.getElementById('mix-details-modal');
+    const mixDetailsCloseBtn = document.getElementById('mix-details-close-btn');
+    const mixDetailsTitle = document.getElementById('mix-details-title');
+    const mixDetailsSummary = document.getElementById('mix-details-summary');
+    const mixDetailsContent = document.getElementById('mix-details-content');
 
     const statsDetailModal = document.getElementById('stats-detail-modal');
     const statsDetailTitle = document.getElementById('stats-detail-title');
@@ -546,6 +551,11 @@ window.addEventListener('DOMContentLoaded', () => {
             sleepTimerDisplay: document.getElementById('sleep-timer-display'),
             playerPlaylistsStats: document.getElementById('player-playlists-stats'),
             playerTracksStats: document.getElementById('player-tracks-stats'),
+            mixDetailsModal,
+            mixDetailsCloseBtn,
+            mixDetailsTitle,
+            mixDetailsSummary,
+            mixDetailsContent,
         },
         state: state,
         helpers: { showLoader, hideLoader, saveSettings, showView, showContextMenu, hideContextMenu, showInfoDialog },

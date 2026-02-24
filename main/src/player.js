@@ -55,6 +55,7 @@ let playerState = {
     selectedPlaylistPath: null,
     activePlaylistIds: [],
     allPlaylists: [],
+    activePlaylistSummaries: [],
 };
 
 // --- Helper Functions ---
@@ -66,6 +67,16 @@ function formatTime(seconds) {
 
 function clamp(value, min, max) {
     return Math.min(Math.max(value, min), max);
+}
+
+function escapeHtml(value) {
+    if (typeof value !== 'string') return '';
+    return value
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#039;');
 }
 
 function getParentDirectory(filePath) {
@@ -601,21 +612,242 @@ function getPlaylistNameByPath(playlistPath) {
     return playerState.allPlaylists.find(p => p.path === playlistPath)?.name || 'Select a playlist';
 }
 
+function getPlaylistByPath(playlistPath) {
+    return playerState.allPlaylists.find(p => p.path === playlistPath) || null;
+}
+
+function getPlaylistTags(playlistPath) {
+    const playlist = getPlaylistByPath(playlistPath);
+    return Array.isArray(playlist?.tags) ? playlist.tags : [];
+}
+
+function getSingleActivePlaylistTag() {
+    if (playerState.activePlaylistIds.length !== 1) return null;
+    const tags = getPlaylistTags(playerState.activePlaylistIds[0]);
+    return tags.length > 0 ? tags[0] : null;
+}
+
+function getCombinedActivePlaylistTags() {
+    const combined = [];
+    const seen = new Set();
+
+    playerState.activePlaylistIds.forEach((playlistPath) => {
+        const tags = getPlaylistTags(playlistPath);
+        tags.forEach((tag) => {
+            const key = tag.toLowerCase();
+            if (seen.has(key)) return;
+            seen.add(key);
+            combined.push(tag);
+        });
+    });
+
+    return combined;
+}
+
+function getPlaylistSummaryByPath(playlistPath) {
+    return playerState.activePlaylistSummaries.find(summary => summary.path === playlistPath) || null;
+}
+
+function getActiveQueueSummaryText() {
+    const totalTracks = playerState.activePlaylistSummaries
+        .reduce((sum, summary) => sum + (Number.isFinite(summary.trackCount) ? summary.trackCount : 0), 0);
+    const totalDurationSeconds = playerState.activePlaylistSummaries
+        .reduce((sum, summary) => sum + (Number.isFinite(summary.durationSeconds) ? summary.durationSeconds : 0), 0);
+    return `${totalTracks} track${totalTracks !== 1 ? 's' : ''} • ${formatDurationForSummary(totalDurationSeconds)}`;
+}
+
+function renderTracksStats() {
+    const { playerTracksStats } = ctx.elements;
+    if (!playerTracksStats) return;
+
+    const activeCount = playerState.activePlaylistIds.length;
+    if (activeCount === 0) {
+        playerTracksStats.textContent = '';
+        playerTracksStats.classList.remove('interactive-stat');
+        playerTracksStats.removeAttribute('title');
+        return;
+    }
+
+    if (activeCount === 1) {
+        const singleTag = getSingleActivePlaylistTag();
+        if (singleTag) {
+            playerTracksStats.textContent = singleTag;
+            playerTracksStats.title = singleTag;
+            playerTracksStats.classList.remove('interactive-stat');
+            return;
+        }
+        playerTracksStats.textContent = getActiveQueueSummaryText();
+        playerTracksStats.classList.remove('interactive-stat');
+        playerTracksStats.removeAttribute('title');
+        return;
+    }
+
+    const combinedTags = getCombinedActivePlaylistTags();
+    playerTracksStats.textContent = `${combinedTags.length} Tag${combinedTags.length !== 1 ? 's' : ''}`;
+    playerTracksStats.classList.add('interactive-stat');
+    playerTracksStats.title = 'Show tags and mix details';
+}
+
 function updateTracksHeader() {
     const { playerTracksHeader } = ctx.elements;
     if (!playerTracksHeader) return;
 
     if (playerState.activePlaylistIds.length === 0) {
         playerTracksHeader.textContent = 'Select a playlist';
+        playerTracksHeader.classList.remove('interactive-header');
+        playerTracksHeader.removeAttribute('title');
         return;
     }
 
     if (playerState.activePlaylistIds.length === 1) {
-        playerTracksHeader.textContent = getPlaylistNameByPath(playerState.activePlaylistIds[0]);
+        const label = getPlaylistNameByPath(playerState.activePlaylistIds[0]);
+        const tagText = getSingleActivePlaylistTag();
+        playerTracksHeader.textContent = tagText
+            ? `${label} • ${getActiveQueueSummaryText()}`
+            : label;
+        playerTracksHeader.classList.remove('interactive-header');
+        playerTracksHeader.removeAttribute('title');
         return;
     }
 
-    playerTracksHeader.textContent = 'Mix';
+    playerTracksHeader.textContent = `Mix • ${getActiveQueueSummaryText()}`;
+    playerTracksHeader.classList.add('interactive-header');
+    playerTracksHeader.title = 'Show mixed playlist details';
+}
+
+function closeMixDetailsModal() {
+    const { mixDetailsModal } = ctx.elements;
+    if (!mixDetailsModal) return;
+    mixDetailsModal.classList.add('hidden');
+}
+
+async function openMixDetailsModal() {
+    if (playerState.activePlaylistIds.length < 2) return;
+
+    const {
+        mixDetailsModal,
+        mixDetailsTitle,
+        mixDetailsSummary,
+        mixDetailsContent,
+    } = ctx.elements;
+    if (!mixDetailsModal || !mixDetailsTitle || !mixDetailsSummary || !mixDetailsContent) return;
+
+    const combinedTags = getCombinedActivePlaylistTags();
+    mixDetailsTitle.textContent = 'Mix Details';
+    mixDetailsSummary.textContent = combinedTags.length > 0
+        ? combinedTags.join(' • ')
+        : 'No tags in current mix.';
+
+    mixDetailsContent.innerHTML = '';
+
+    playerState.activePlaylistIds.forEach((playlistPath) => {
+        const playlist = getPlaylistByPath(playlistPath);
+        const summary = getPlaylistSummaryByPath(playlistPath);
+        if (!playlist || !summary) return;
+
+        const card = document.createElement('div');
+        card.className = 'mix-playlist-card';
+
+        const tags = Array.isArray(playlist.tags) && playlist.tags.length > 0
+            ? playlist.tags.join(', ')
+            : 'No tags';
+
+        card.innerHTML = `
+            <div class="mix-playlist-card-header">
+                <span class="mix-playlist-card-title" title="${escapeHtml(playlist.name)}">${escapeHtml(playlist.name)}</span>
+                <span class="mix-playlist-card-badge">In Mix</span>
+            </div>
+            <div class="mix-playlist-card-meta">${summary.trackCount} track${summary.trackCount !== 1 ? 's' : ''} • ${formatDurationForSummary(summary.durationSeconds)}</div>
+            <div class="mix-playlist-card-tags" title="${escapeHtml(tags)}">${escapeHtml(tags)}</div>
+            <div class="mix-playlist-card-actions"></div>
+        `;
+
+        const actions = card.querySelector('.mix-playlist-card-actions');
+        const addActionButton = (label, variant, handler) => {
+            const button = document.createElement('button');
+            button.type = 'button';
+            button.className = `mix-card-action-btn${variant ? ` ${variant}` : ''}`;
+            button.textContent = label;
+            button.addEventListener('click', async (event) => {
+                event.stopPropagation();
+                await handler();
+            });
+            actions.appendChild(button);
+        };
+
+        addActionButton('Remove from Mix', 'secondary-btn', async () => {
+            await togglePlaylistMix(playlist.path);
+            if (playerState.activePlaylistIds.length < 2) closeMixDetailsModal();
+            else await openMixDetailsModal();
+        });
+
+        if (!playlist.isSmart) {
+            addActionButton('Rename', 'secondary-btn', async () => {
+                await renamePlaylistFromContext(playlist);
+                await openMixDetailsModal();
+            });
+            addActionButton('Delete', 'danger-btn', async () => {
+                await deletePlaylistFromContext(playlist);
+                if (playerState.activePlaylistIds.length < 2) closeMixDetailsModal();
+                else await openMixDetailsModal();
+            });
+            addActionButton('Show in Folder', 'secondary-btn', async () => {
+                window.electronAPI.showInExplorer(playlist.path);
+            });
+        }
+
+        card.addEventListener('contextmenu', (event) => {
+            event.preventDefault();
+            const menuItems = [
+                {
+                    label: 'Remove from Mix',
+                    action: async () => {
+                        await togglePlaylistMix(playlist.path);
+                        if (playerState.activePlaylistIds.length < 2) closeMixDetailsModal();
+                        else await openMixDetailsModal();
+                    },
+                },
+                {
+                    label: 'More info',
+                    action: async () => {
+                        await showPlaylistInfoFromContext(playlist);
+                    },
+                },
+            ];
+
+            if (!playlist.isSmart) {
+                menuItems.push(
+                    { type: 'separator' },
+                    {
+                        label: 'Rename',
+                        action: async () => {
+                            await renamePlaylistFromContext(playlist);
+                            await openMixDetailsModal();
+                        },
+                    },
+                    {
+                        label: 'Delete',
+                        action: async () => {
+                            await deletePlaylistFromContext(playlist);
+                            if (playerState.activePlaylistIds.length < 2) closeMixDetailsModal();
+                            else await openMixDetailsModal();
+                        },
+                    },
+                    { type: 'separator' },
+                    {
+                        label: 'Show in Folder',
+                        action: () => window.electronAPI.showInExplorer(playlist.path),
+                    }
+                );
+            }
+
+            ctx.helpers.showContextMenu(event.clientX, event.clientY, menuItems);
+        });
+
+        mixDetailsContent.appendChild(card);
+    });
+
+    mixDetailsModal.classList.remove('hidden');
 }
 
 async function togglePlaylistMix(playlistPath) {
@@ -650,6 +882,9 @@ async function renamePlaylistFromContext(playlist) {
         return;
     }
 
+    const oldPath = playlist.path;
+    const newPath = result.newPath;
+
     ctx.helpers.showNotification(
         'success',
         'Renamed',
@@ -664,8 +899,6 @@ async function renamePlaylistFromContext(playlist) {
             },
         }
     );
-    const oldPath = playlist.path;
-    const newPath = result.newPath;
 
     playerState.activePlaylistIds = playerState.activePlaylistIds.map(id => (id === oldPath ? newPath : id));
     if (playerState.selectedPlaylistPath === oldPath) playerState.selectedPlaylistPath = newPath;
@@ -821,10 +1054,12 @@ function formatPlaylistDetailsDate(value) {
 }
 
 function buildPlaylistDetailsMessage(details) {
+    const tagText = Array.isArray(details.tags) && details.tags.length > 0 ? details.tags.join(', ') : 'None';
     return [
         `Playlist: ${details.name || 'Unknown'}`,
         `Tracks: ${Number.isFinite(details.trackCount) ? details.trackCount : 0}`,
         `Total duration: ${formatTrackDetailsDuration(details.totalDurationSeconds)}`,
+        `Tags: ${tagText}`,
         `Size: ${details.totalSizeFormatted || 'Unknown'}`,
         `Created: ${formatPlaylistDetailsDate(details.createdAt)}`,
         `Modified: ${formatPlaylistDetailsDate(details.modifiedAt)}`,
@@ -841,6 +1076,63 @@ async function showPlaylistInfoFromContext(playlist) {
     }
 
     await ctx.helpers.showInfoDialog('Playlist Details', buildPlaylistDetailsMessage(result.details), { confirmText: 'Close' });
+}
+
+async function addTagToPlaylistFromContext(playlist) {
+    if (playlist?.isSmart) return;
+
+    const tagInput = await ctx.helpers.showPromptDialog(
+        'Add Playlist Tag',
+        `Add a tag for "${playlist.name}"`,
+        '',
+        { confirmText: 'Add Tag', cancelText: 'Cancel', placeholder: 'e.g. focus, classics, roadtrip' }
+    );
+
+    const trimmedTag = tagInput?.trim();
+    if (!trimmedTag) return;
+
+    const result = await window.electronAPI.addPlaylistTag({ playlistPath: playlist.path, tag: trimmedTag });
+    if (!result?.success) {
+        ctx.helpers.showNotification('error', 'Add Playlist Tag Failed', result?.error || 'Could not add playlist tag.');
+        return;
+    }
+
+    ctx.helpers.showNotification('success', 'Tag Added', `"${trimmedTag}" added to "${playlist.name}".`);
+    await renderPlaylists();
+    await renderActiveTracks({ autoplayFirstTrack: false, preserveCurrentTrack: true });
+}
+
+async function editTagOnPlaylistFromContext(playlist) {
+    if (playlist?.isSmart) return;
+
+    const existingTags = Array.isArray(playlist?.tags) ? playlist.tags : [];
+    if (existingTags.length === 0) return;
+
+    const currentTag = existingTags[0];
+    const tagInput = await ctx.helpers.showPromptDialog(
+        'Edit Playlist Tag',
+        'Edit the playlist tag, or leave empty to remove it.',
+        currentTag,
+        { confirmText: 'Save Tag', cancelText: 'Cancel', placeholder: 'Tag text' }
+    );
+
+    if (tagInput === null) return;
+
+    const result = await window.electronAPI.updatePlaylistTag({
+        playlistPath: playlist.path,
+        oldTag: currentTag,
+        newTag: tagInput,
+    });
+
+    if (!result?.success) {
+        ctx.helpers.showNotification('error', 'Edit Playlist Tag Failed', result?.error || 'Could not update playlist tag.');
+        return;
+    }
+
+    const wasRemoved = !(typeof tagInput === 'string' && tagInput.trim());
+    ctx.helpers.showNotification('success', wasRemoved ? 'Tag Removed' : 'Tag Updated', wasRemoved ? `Removed "${currentTag}".` : `Updated to "${tagInput.trim()}".`);
+    await renderPlaylists();
+    await renderActiveTracks({ autoplayFirstTrack: false, preserveCurrentTrack: true });
 }
 
 function buildTrackDetailsMessage(details) {
@@ -1035,6 +1327,7 @@ function renderTracklistUI() {
     }
 
     const query = playerState.trackSearchQuery.trim().toLowerCase();
+    const shouldCompactMeta = Boolean(getSingleActivePlaylistTag());
     const filteredTracks = currentTracklist
         .map((track, index) => ({ track, index }))
         .filter(({ track }) => {
@@ -1052,6 +1345,7 @@ function renderTracklistUI() {
     filteredTracks.forEach(({ track, index }) => {
         const item = document.createElement('div');
         item.className = 'player-track-item';
+        item.classList.toggle('has-playlist-tag', shouldCompactMeta);
         item.dataset.trackIndex = String(index);
         // Use the current index + 1 for the display number so it always goes 1, 2, 3...
         const renderedQueueNumber = index + 1;
@@ -1132,8 +1426,9 @@ async function renderActiveTracks(options = {}) {
     if (activeIds.length === 0) {
         log('Render tracks called with no active playlists');
         playerTracksContainer.innerHTML = `<div class="empty-playlist-message">Select a playlist to see its tracks.</div>`;
-        const { playerTracksStats } = ctx.elements;
-        if (playerTracksStats) playerTracksStats.textContent = '';
+        playerState.activePlaylistSummaries = [];
+        renderTracksStats();
+        updateTracksHeader();
         currentTracklist = [];
         currentTrackIndex = -1;
         resetPlaybackState();
@@ -1148,25 +1443,29 @@ async function renderActiveTracks(options = {}) {
         const allPlaylistResults = await Promise.all(activeIds.map(playlistPath => window.electronAPI.getPlaylistTracks(playlistPath)));
 
         const mergedTracklist = [];
+        playerState.activePlaylistSummaries = allPlaylistResults.map(({ tracks }, resultIndex) => {
+            const trackCount = Array.isArray(tracks) ? tracks.length : 0;
+            const durationSeconds = (Array.isArray(tracks) ? tracks : []).reduce((sum, track) => {
+                const duration = Number.isFinite(track.duration) ? track.duration : 0;
+                return sum + duration;
+            }, 0);
+
+            const playlistPath = activeIds[resultIndex];
+            const playlist = getPlaylistByPath(playlistPath);
+            return {
+                path: playlistPath,
+                name: playlist?.name || getPlaylistNameByPath(playlistPath),
+                trackCount,
+                durationSeconds,
+            };
+        });
+
         allPlaylistResults.forEach(({ tracks }, resultIndex) => {
             mergedTracklist.push(...buildTracklistForPlaylist(tracks, activeIds[resultIndex]));
         });
 
-        const { playerTracksStats } = ctx.elements;
-        if (playerTracksStats) {
-            const trackCount = mergedTracklist.length;
-            playerTracksStats.textContent = `${trackCount} track${trackCount !== 1 ? 's' : ''} • ...`;
-            
-            Promise.all(activeIds.map(playlistPath => window.electronAPI.getPlaylistDuration(playlistPath)))
-                .then(durations => {
-                    const totalDurationSeconds = durations.reduce((sum, d) => sum + d, 0);
-                    const hours = Math.floor(totalDurationSeconds / 3600);
-                    const minutes = Math.floor((totalDurationSeconds % 3600) / 60);
-                    const durationStr = `${hours}:${minutes.toString().padStart(2, '0')}`;
-                    playerTracksStats.textContent = `${trackCount} track${trackCount !== 1 ? 's' : ''} • ${durationStr}`;
-                })
-                .catch(err => logError('Failed to get duration for stats', { error: err.message }));
-        }
+        updateTracksHeader();
+        renderTracksStats();
 
         const normalizedTracklist = normalizeQueueNumbers(mergedTracklist);
         originalTracklist = [...normalizedTracklist];
@@ -1211,12 +1510,18 @@ async function renderActiveTracks(options = {}) {
         highlightCurrentTrack();
     } catch (error) {
         logError('Failed to render tracks', { activeIds, error: error?.message });
+        playerState.activePlaylistSummaries = [];
+        renderTracksStats();
+        updateTracksHeader();
         playerTracksContainer.innerHTML = `<div class="empty-playlist-message">Error loading tracks.</div>`;
     }
 }
 
 async function setActivePlaylists(nextIds, options = {}) {
     const normalizedIds = [...new Set(nextIds)];
+    if (normalizedIds.length < 2) {
+        closeMixDetailsModal();
+    }
     playerState.activePlaylistIds = normalizedIds;
     playerState.selectedPlaylistPath = normalizedIds[0] || null;
     syncSharedActiveState();
@@ -1296,7 +1601,14 @@ async function renderPlaylists() {
             const item = document.createElement('div');
             item.className = 'playlist-list-item';
             item.dataset.path = p.path;
-            item.innerHTML = `<span class="playlist-name" title="${p.name}">${p.name}</span><button class="playlist-add-btn" type="button" title="Add to Mix" aria-label="Add to Mix">+</button>`;
+            const tags = Array.isArray(p.tags) ? p.tags : [];
+            const primaryTag = tags[0] || '';
+            const hasMoreTags = tags.length > 1;
+            const tagSuffix = hasMoreTags ? ` +${tags.length - 1}` : '';
+            const tagMarkup = primaryTag
+                ? `<span class="playlist-tag-badge" title="${escapeHtml(primaryTag)}">${escapeHtml(primaryTag)}${tagSuffix}</span>`
+                : '';
+            item.innerHTML = `<span class="playlist-name" title="${escapeHtml(p.name)}">${escapeHtml(p.name)}</span>${tagMarkup}<button class="playlist-add-btn" type="button" title="Add to Mix" aria-label="Add to Mix">+</button>`;
 
             const addBtn = item.querySelector('.playlist-add-btn');
             addBtn.addEventListener('click', async (event) => {
@@ -1331,6 +1643,24 @@ async function renderPlaylists() {
                         },
                     },
                 ];
+
+                if (!isSmartPlaylist) {
+                    menuItems.push({
+                        label: 'Add tag',
+                        action: async () => {
+                            await addTagToPlaylistFromContext(p);
+                        },
+                    });
+                }
+
+                if (!isSmartPlaylist && Array.isArray(p.tags) && p.tags.length > 0) {
+                    menuItems.push({
+                        label: 'Edit tag',
+                        action: async () => {
+                            await editTagOnPlaylistFromContext(p);
+                        },
+                    });
+                }
 
                 if (!isSmartPlaylist) {
                     menuItems.push(
@@ -1382,7 +1712,11 @@ export function initializePlayer(context) {
         playPauseBtn, prevBtn, nextBtn,
         progressBarContainer, volumeSlider, volumeIconContainer,
         shuffleBtn, repeatBtn, playerPlaylistSearchInput, playerTrackSearchInput,
-        sleepTimerBtn
+        sleepTimerBtn,
+        playerTracksHeader,
+        playerTracksStats,
+        mixDetailsModal,
+        mixDetailsCloseBtn
     } = ctx.elements;
 
     if (ctx.state.activeQueuePaths instanceof Set) {
@@ -1456,6 +1790,34 @@ export function initializePlayer(context) {
     }
 
     log('Initializing player module');
+
+    if (playerTracksHeader) {
+        playerTracksHeader.addEventListener('click', async () => {
+            if (playerState.activePlaylistIds.length < 2) return;
+            await openMixDetailsModal();
+        });
+    }
+
+    if (playerTracksStats) {
+        playerTracksStats.addEventListener('click', async () => {
+            if (!playerTracksStats.classList.contains('interactive-stat')) return;
+            await openMixDetailsModal();
+        });
+    }
+
+    if (mixDetailsCloseBtn) {
+        mixDetailsCloseBtn.addEventListener('click', () => {
+            closeMixDetailsModal();
+        });
+    }
+
+    if (mixDetailsModal) {
+        mixDetailsModal.addEventListener('click', (event) => {
+            if (event.target === mixDetailsModal) {
+                closeMixDetailsModal();
+            }
+        });
+    }
 
     // --- Event Listeners for Audio Element ---
     audio.addEventListener('play', () => {
@@ -1558,4 +1920,12 @@ export function initializePlayer(context) {
 
     ctx.state.isPlayerInitialized = true;
     log('Player initialized successfully');
+}
+
+function formatDurationForSummary(totalDurationSeconds) {
+    if (!Number.isFinite(totalDurationSeconds) || totalDurationSeconds <= 0) return '0:00';
+    const rounded = Math.round(totalDurationSeconds);
+    const hours = Math.floor(rounded / 3600);
+    const minutes = Math.floor((rounded % 3600) / 60);
+    return `${hours}:${String(minutes).padStart(2, '0')}`;
 }

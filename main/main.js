@@ -51,6 +51,7 @@ const configPath = path.join(app.getPath('userData'), 'config.json');
 const statsPath = path.join(app.getPath('userData'), 'stats.json');
 const cachePath = path.join(app.getPath('userData'), 'link_cache.json');
 const trackTagsPath = path.join(app.getPath('userData'), 'track_tags.json');
+const playlistTagsPath = path.join(app.getPath('userData'), 'playlist_tags.json');
 const metadataCachePath = path.join(app.getPath('userData'), 'track_metadata_cache.json');
 const trackPlayCountsPath = path.join(app.getPath('userData'), 'track_play_counts.json');
 const undoTrashPath = path.join(app.getPath('userData'), 'undo-trash');
@@ -64,6 +65,7 @@ let config = {};
 let stats = {};
 let linkCache = {};
 let trackTags = {};
+let playlistTags = {};
 let metadataCache = {};
 let trackPlayCounts = {};
 let downloadsDir = path.join(app.getPath('downloads'), 'SoundLink');
@@ -608,6 +610,7 @@ loadConfig();
 loadStats();
 loadCache();
 loadTrackTags();
+loadPlaylistTags();
 loadMetadataCache();
 loadTrackPlayCounts();
 findYtdlpExecutables();
@@ -840,6 +843,7 @@ app.whenReady().then(() => {
                         totalDurationSeconds: smart.totalDuration,
                         totalSizeBytes: 0,
                         totalSizeFormatted: formatBytes(0),
+                        tags: [],
                         createdAt: null,
                         modifiedAt: null,
                     },
@@ -886,6 +890,7 @@ app.whenReady().then(() => {
                     totalDurationSeconds,
                     totalSizeBytes,
                     totalSizeFormatted: formatBytes(totalSizeBytes),
+                    tags: getPlaylistTagsForPath(playlistPath),
                     createdAt: playlistStat.birthtime?.toISOString?.() || null,
                     modifiedAt: playlistStat.mtime?.toISOString?.() || null,
                 },
@@ -1037,6 +1042,57 @@ app.whenReady().then(() => {
 
     ipcMain.handle('get-track-tags', async (_event, filePath) => {
         return { success: true, tags: getTrackTagsForPath(filePath) };
+    });
+
+    ipcMain.handle('get-playlist-tags', async (_event, playlistPath) => {
+        return { success: true, tags: getPlaylistTagsForPath(playlistPath) };
+    });
+
+    ipcMain.handle('add-playlist-tag', async (_event, { playlistPath, tag }) => {
+        try {
+            if (!playlistPath || typeof playlistPath !== 'string') {
+                return { success: false, error: 'Invalid playlist path.' };
+            }
+
+            const normalizedTag = typeof tag === 'string' ? tag.trim() : '';
+            if (!normalizedTag) {
+                return { success: false, error: 'Tag cannot be empty.' };
+            }
+
+            const existing = getPlaylistTagsForPath(playlistPath);
+            existing.push(normalizedTag);
+            setPlaylistTagsForPath(playlistPath, existing);
+            savePlaylistTags();
+
+            return { success: true, tags: getPlaylistTagsForPath(playlistPath) };
+        } catch (error) {
+            return { success: false, error: error.message };
+        }
+    });
+
+    ipcMain.handle('update-playlist-tag', async (_event, { playlistPath, oldTag, newTag }) => {
+        try {
+            if (!playlistPath || typeof playlistPath !== 'string') {
+                return { success: false, error: 'Invalid playlist path.' };
+            }
+
+            const normalizedOld = typeof oldTag === 'string' ? oldTag.trim().toLowerCase() : '';
+            if (!normalizedOld) {
+                return { success: false, error: 'Original tag is required.' };
+            }
+
+            const existing = getPlaylistTagsForPath(playlistPath);
+            const updated = existing.filter(tagValue => tagValue.toLowerCase() !== normalizedOld);
+
+            const nextTag = typeof newTag === 'string' ? newTag.trim() : '';
+            if (nextTag) updated.push(nextTag);
+
+            setPlaylistTagsForPath(playlistPath, updated);
+            savePlaylistTags();
+            return { success: true, tags: getPlaylistTagsForPath(playlistPath) };
+        } catch (error) {
+            return { success: false, error: error.message };
+        }
     });
 
     ipcMain.handle('add-track-tag', async (_event, { filePath, tag }) => {
@@ -1401,6 +1457,7 @@ app.whenReady().then(() => {
             }
 
             await fs.promises.rename(oldPath, newPath);
+            movePlaylistTagsPath(oldPath, newPath);
             return { success: true, newPath };
         } catch (error) {
             console.error(`Failed to rename playlist from ${oldPath} to ${newName}`, error);
@@ -1491,6 +1548,7 @@ app.whenReady().then(() => {
                 }
 
                 await fs.promises.rename(currentPath, targetPath);
+                movePlaylistTagsPath(currentPath, targetPath);
                 return { success: true, restoredPath: targetPath };
             }
 
@@ -3095,7 +3153,15 @@ async function getPhysicalPlaylists(playlistsPath) {
     if (!playlistsPath || !fs.existsSync(playlistsPath)) return [];
     const entries = await fs.promises.readdir(playlistsPath, { withFileTypes: true });
     const directories = entries.filter(entry => entry.isDirectory());
-    return directories.map(entry => ({ name: entry.name, path: path.join(playlistsPath, entry.name), isSmart: false }));
+    return directories.map(entry => {
+        const playlistPath = path.join(playlistsPath, entry.name);
+        return {
+            name: entry.name,
+            path: playlistPath,
+            isSmart: false,
+            tags: getPlaylistTagsForPath(playlistPath),
+        };
+    });
 }
 
 async function getAllTrackEntriesFromLibrary(playlistsPath, options = {}) {
@@ -3251,4 +3317,51 @@ function refreshTrayContextMenu() {
         : 'Sleep Off';
     const tooltipPrefix = trayPlaybackState.isPlaying ? 'Playing' : 'Paused';
     tray.setToolTip(`SoundLink • ${tooltipPrefix}\n${tooltipTrack}\n${tooltipSleep}`);
+}
+
+function loadPlaylistTags() {
+    try {
+        if (fs.existsSync(playlistTagsPath)) {
+            const parsed = JSON.parse(fs.readFileSync(playlistTagsPath, 'utf-8'));
+            playlistTags = parsed && typeof parsed === 'object' ? parsed : {};
+        } else {
+            playlistTags = {};
+            fs.writeFileSync(playlistTagsPath, JSON.stringify(playlistTags, null, 4));
+        }
+    } catch (error) {
+        console.error('Failed to load or create playlist tags file:', error);
+        playlistTags = {};
+    }
+}
+
+function savePlaylistTags() {
+    try {
+        safeWriteFileSync(playlistTagsPath, JSON.stringify(playlistTags, null, 4));
+    } catch (error) {
+        console.error('Failed to save playlist tags file:', error);
+    }
+}
+
+function getPlaylistTagsForPath(playlistPath) {
+    if (!playlistPath || typeof playlistPath !== 'string') return [];
+    return normalizeTagList(playlistTags[playlistPath]);
+}
+
+function setPlaylistTagsForPath(playlistPath, tags) {
+    if (!playlistPath || typeof playlistPath !== 'string') return;
+    const normalized = normalizeTagList(tags);
+    if (normalized.length === 0) {
+        delete playlistTags[playlistPath];
+    } else {
+        playlistTags[playlistPath] = normalized;
+    }
+}
+
+function movePlaylistTagsPath(fromPath, toPath) {
+    if (!fromPath || !toPath || fromPath === toPath) return;
+    const tags = getPlaylistTagsForPath(fromPath);
+    if (tags.length === 0) return;
+    setPlaylistTagsForPath(toPath, tags);
+    delete playlistTags[fromPath];
+    savePlaylistTags();
 }
