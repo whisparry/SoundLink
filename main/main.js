@@ -54,6 +54,7 @@ const trackTagsPath = path.join(app.getPath('userData'), 'track_tags.json');
 const playlistTagsPath = path.join(app.getPath('userData'), 'playlist_tags.json');
 const metadataCachePath = path.join(app.getPath('userData'), 'track_metadata_cache.json');
 const trackPlayCountsPath = path.join(app.getPath('userData'), 'track_play_counts.json');
+const playlistSyncCachePath = path.join(app.getPath('userData'), 'playlist_sync_cache.json');
 const undoTrashPath = path.join(app.getPath('userData'), 'undo-trash');
 const trimUndoManifestPath = path.join(app.getPath('userData'), 'trim-undo-manifests');
 const ytdlpDir = isDev ? path.join(__dirname, 'yt-dlp') : path.join(process.resourcesPath, 'yt-dlp');
@@ -69,6 +70,7 @@ let trackTags = {};
 let playlistTags = {};
 let metadataCache = {};
 let trackPlayCounts = {};
+let playlistSyncCache = {};
 let downloadsDir = path.join(app.getPath('downloads'), 'SoundLink');
 let mainWindow;
 let tray = null;
@@ -79,6 +81,7 @@ let ytdlpInstanceIndex = 0;
 let lastDownloadedFiles = [];
 let lastPlaylistName = null;
 let isDownloadCancelled = false;
+let lastDownloadedTrackContexts = {};
 let cachedYtdlpPluginPath = undefined;
 let hasLoggedMissingYtdlpPlugin = false;
 let cachedYtdlpPluginFlag = undefined;
@@ -394,6 +397,166 @@ function saveCache() {
     }
 }
 
+function normalizePathKey(filePath) {
+    if (typeof filePath !== 'string' || filePath.trim().length === 0) return '';
+    const normalized = path.normalize(filePath.trim());
+    return process.platform === 'win32' ? normalized.toLowerCase() : normalized;
+}
+
+function normalizePlaylistSyncCacheShape(parsed) {
+    const playlistsRaw = parsed && typeof parsed === 'object' && parsed.playlists && typeof parsed.playlists === 'object'
+        ? parsed.playlists
+        : {};
+    const normalizedPlaylists = {};
+
+    for (const [rawKey, value] of Object.entries(playlistsRaw)) {
+        const normalizedKey = normalizePathKey(rawKey);
+        if (!normalizedKey || !value || typeof value !== 'object') continue;
+
+        const source = value.source && typeof value.source === 'object' ? value.source : null;
+        const tracksRaw = value.tracks && typeof value.tracks === 'object' ? value.tracks : {};
+        const tracks = {};
+        for (const [trackKey, trackValue] of Object.entries(tracksRaw)) {
+            if (typeof trackKey !== 'string' || !trackKey.trim()) continue;
+            if (!trackValue || typeof trackValue !== 'object') continue;
+            tracks[trackKey] = {
+                spotifyUrl: trackValue.spotifyUrl || trackKey,
+                spotifyId: trackValue.spotifyId || null,
+                name: trackValue.name || '',
+                artist: trackValue.artist || '',
+                durationMs: Number.isFinite(trackValue.durationMs) ? trackValue.durationMs : null,
+                position: Number.isFinite(trackValue.position) ? trackValue.position : null,
+                localPath: typeof trackValue.localPath === 'string' ? trackValue.localPath : null,
+                updatedAt: trackValue.updatedAt || null,
+            };
+        }
+
+        normalizedPlaylists[normalizedKey] = {
+            source: source
+                ? {
+                    link: source.link || null,
+                    type: source.type || null,
+                    id: source.id || null,
+                    name: source.name || null,
+                    lastSyncedAt: source.lastSyncedAt || null,
+                }
+                : null,
+            tracks,
+        };
+    }
+
+    return {
+        version: 1,
+        playlists: normalizedPlaylists,
+    };
+}
+
+function loadPlaylistSyncCache() {
+    try {
+        if (fs.existsSync(playlistSyncCachePath)) {
+            const parsed = JSON.parse(fs.readFileSync(playlistSyncCachePath, 'utf-8'));
+            playlistSyncCache = normalizePlaylistSyncCacheShape(parsed);
+        } else {
+            playlistSyncCache = normalizePlaylistSyncCacheShape({});
+            fs.writeFileSync(playlistSyncCachePath, JSON.stringify(playlistSyncCache, null, 4));
+        }
+    } catch (error) {
+        console.error('Failed to load or create playlist sync cache file:', error);
+        playlistSyncCache = normalizePlaylistSyncCacheShape({});
+    }
+}
+
+function savePlaylistSyncCache() {
+    try {
+        safeWriteFileSync(playlistSyncCachePath, JSON.stringify(playlistSyncCache, null, 4));
+    } catch (error) {
+        console.error('Failed to save playlist sync cache file:', error);
+    }
+}
+
+function getPlaylistSyncEntry(playlistPath) {
+    const key = normalizePathKey(playlistPath);
+    if (!key) return null;
+    return playlistSyncCache?.playlists?.[key] || null;
+}
+
+function ensurePlaylistSyncEntry(playlistPath) {
+    const key = normalizePathKey(playlistPath);
+    if (!key) return null;
+
+    if (!playlistSyncCache.playlists[key]) {
+        playlistSyncCache.playlists[key] = {
+            source: null,
+            tracks: {},
+        };
+    }
+
+    return playlistSyncCache.playlists[key];
+}
+
+function removePlaylistSyncEntry(playlistPath) {
+    const key = normalizePathKey(playlistPath);
+    if (!key) return;
+    if (!playlistSyncCache?.playlists?.[key]) return;
+    delete playlistSyncCache.playlists[key];
+    savePlaylistSyncCache();
+}
+
+function movePlaylistSyncEntry(oldPath, newPath) {
+    const oldKey = normalizePathKey(oldPath);
+    const newKey = normalizePathKey(newPath);
+    if (!oldKey || !newKey || oldKey === newKey) return;
+
+    const existing = playlistSyncCache?.playlists?.[oldKey];
+    if (!existing) return;
+
+    const moved = {
+        source: existing.source ? { ...existing.source } : null,
+        tracks: {},
+    };
+    for (const [spotifyUrl, trackEntry] of Object.entries(existing.tracks || {})) {
+        const localPath = typeof trackEntry.localPath === 'string' && trackEntry.localPath
+            ? path.join(newPath, path.basename(trackEntry.localPath))
+            : null;
+        moved.tracks[spotifyUrl] = {
+            ...trackEntry,
+            localPath,
+        };
+    }
+
+    playlistSyncCache.playlists[newKey] = moved;
+    delete playlistSyncCache.playlists[oldKey];
+    savePlaylistSyncCache();
+}
+
+function parseSpotifyLinkInfo(link) {
+    if (typeof link !== 'string') return null;
+    const match = link.match(/spotify\.com\/(playlist|album|track)\/([a-zA-Z0-9]+)/i);
+    if (!match) return null;
+    return {
+        type: match[1].toLowerCase(),
+        id: match[2],
+        link: link.trim(),
+    };
+}
+
+function recordDownloadedTrackContext(filePath, context) {
+    const key = normalizePathKey(filePath);
+    if (!key || !context || typeof context !== 'object') return;
+    lastDownloadedTrackContexts[key] = {
+        spotifyUrl: context.spotifyUrl || null,
+        spotifyId: context.spotifyId || null,
+        name: context.name || '',
+        artist: context.artist || '',
+        durationMs: Number.isFinite(context.durationMs) ? context.durationMs : null,
+        playlistSource: context.playlistSource || null,
+    };
+}
+
+function hasPlaylistSourceContextForDownloads() {
+    return Object.values(lastDownloadedTrackContexts).some(ctx => ctx?.playlistSource?.type === 'playlist');
+}
+
 function getNextYtdlpInstance() {
     if (ytdlpThreadInstances.length === 0) return null;
     const instance = ytdlpThreadInstances[ytdlpInstanceIndex];
@@ -663,6 +826,7 @@ loadTrackTags();
 loadPlaylistTags();
 loadMetadataCache();
 loadTrackPlayCounts();
+loadPlaylistSyncCache();
 findYtdlpExecutables();
 if (!fs.existsSync(downloadsDir)) {
     fs.mkdirSync(downloadsDir, { recursive: true });
@@ -1462,6 +1626,14 @@ app.whenReady().then(() => {
             if (!filePath || !fs.existsSync(filePath)) {
                 return { success: false, error: 'File does not exist.' };
             }
+            for (const playlistEntry of Object.values(playlistSyncCache.playlists || {})) {
+                for (const [spotifyUrl, trackEntry] of Object.entries(playlistEntry.tracks || {})) {
+                    if (normalizePathKey(trackEntry.localPath) === normalizePathKey(filePath)) {
+                        delete playlistEntry.tracks[spotifyUrl];
+                    }
+                }
+            }
+            savePlaylistSyncCache();
             const moved = await moveToUndoTrash(filePath);
             return {
                 success: true,
@@ -1488,6 +1660,15 @@ app.whenReady().then(() => {
             const destinationPath = path.join(destinationPlaylistPath, fileName);
             await fs.promises.rename(sourcePath, destinationPath);
             moveTrackTagsPath(sourcePath, destinationPath);
+
+            for (const playlistEntry of Object.values(playlistSyncCache.playlists || {})) {
+                for (const [spotifyUrl, trackEntry] of Object.entries(playlistEntry.tracks || {})) {
+                    if (normalizePathKey(trackEntry.localPath) === normalizePathKey(sourcePath)) {
+                        delete playlistEntry.tracks[spotifyUrl];
+                    }
+                }
+            }
+            savePlaylistSyncCache();
             return { success: true };
         } catch (error) {
             console.error(`Failed to move track from ${sourcePath} to ${destinationPlaylistPath}`, error);
@@ -1510,6 +1691,7 @@ app.whenReady().then(() => {
 
             await fs.promises.rename(oldPath, newPath);
             movePlaylistTagsPath(oldPath, newPath);
+            movePlaylistSyncEntry(oldPath, newPath);
             return { success: true, newPath };
         } catch (error) {
             console.error(`Failed to rename playlist from ${oldPath} to ${newName}`, error);
@@ -1632,6 +1814,7 @@ app.whenReady().then(() => {
             if (!playlistPath || !fs.existsSync(playlistPath)) {
                 return { success: false, error: 'Playlist folder does not exist.' };
             }
+            removePlaylistSyncEntry(playlistPath);
             const moved = await moveToUndoTrash(playlistPath);
             return {
                 success: true,
@@ -1766,6 +1949,16 @@ app.whenReady().then(() => {
 
             await fs.promises.rename(oldPath, newPath);
             moveTrackTagsPath(oldPath, newPath);
+
+            for (const playlistEntry of Object.values(playlistSyncCache.playlists || {})) {
+                for (const trackEntry of Object.values(playlistEntry.tracks || {})) {
+                    if (normalizePathKey(trackEntry.localPath) === normalizePathKey(oldPath)) {
+                        trackEntry.localPath = newPath;
+                        trackEntry.updatedAt = new Date().toISOString();
+                    }
+                }
+            }
+            savePlaylistSyncCache();
             return { success: true, newPath };
         } catch (error) {
             console.error(`Failed to rename track from ${oldPath} to ${newName}`, error);
@@ -1894,6 +2087,7 @@ app.whenReady().then(() => {
         stats.downloadsInitiated = (stats.downloadsInitiated || 0) + 1;
         lastDownloadedFiles = [];
         lastPlaylistName = null;
+        lastDownloadedTrackContexts = {};
         isDownloadCancelled = false;
         mainWindow.webContents.send('update-status', `Starting download queue with ${queuedLinks.length} item(s)...`);
 
@@ -1915,7 +2109,7 @@ app.whenReady().then(() => {
 
                 if (link.includes('spotify.com')) {
                     spotifyLinkCount++;
-                    const { tracks, playlistName, error } = await getSpotifyTracks(link);
+                    const { tracks, playlistName, sourceInfo, error } = await getSpotifyTracks(link);
                     if (error) {
                         mainWindow.webContents.send('update-status', `Queue ${queuePosition}/${queuedLinks.length}: error processing Spotify link: ${error}`);
                         continue;
@@ -1933,6 +2127,21 @@ app.whenReady().then(() => {
                                 name: track.name,
                                 metadata: track.metadata,
                                 durationMs: track.durationMs,
+                                sourceTrack: {
+                                    spotifyUrl: track.spotifyUrl || null,
+                                    spotifyId: track.spotifyId || null,
+                                    name: track.name,
+                                    artist: track.artist,
+                                    durationMs: track.durationMs,
+                                    playlistSource: sourceInfo && sourceInfo.type === 'playlist'
+                                        ? {
+                                            type: sourceInfo.type,
+                                            id: sourceInfo.id,
+                                            link: sourceInfo.link,
+                                            name: playlistDisplayName,
+                                        }
+                                        : null,
+                                },
                                 index: trackIndex++,
                                 queuePosition,
                                 queueTotal: queuedLinks.length,
@@ -2123,6 +2332,7 @@ app.whenReady().then(() => {
                             trackName,
                             index: item.index,
                             metadata: item.metadata,
+                            sourceTrack: item.sourceTrack || null,
                             outputDir,
                             queuePosition: item.queuePosition,
                             queueTotal: item.queueTotal,
@@ -2219,6 +2429,9 @@ app.whenReady().then(() => {
                         fileProgress[item.queueIndex] = 100;
                         updateOverallProgress();
                         lastDownloadedFiles.push(filePath);
+                        if (item.sourceTrack?.spotifyUrl) {
+                            recordDownloadedTrackContext(filePath, item.sourceTrack);
+                        }
                         stats.totalSongsDownloaded = (stats.totalSongsDownloaded || 0) + 1;
                     } catch (error) {
                         trackStartTimes.delete(item.queueIndex);
@@ -2251,6 +2464,62 @@ app.whenReady().then(() => {
         }
     });
 
+    function persistPlaylistSyncCacheFromMoves(playlistPath, movedTracks = []) {
+        if (!playlistPath || !Array.isArray(movedTracks) || movedTracks.length === 0) return;
+
+        const playlistSourceTracks = movedTracks
+            .map(item => item.context)
+            .filter(ctx => ctx?.playlistSource?.type === 'playlist' && ctx.spotifyUrl);
+
+        if (playlistSourceTracks.length === 0) return;
+
+        const sourceGroups = new Map();
+        for (const track of playlistSourceTracks) {
+            const sourceKey = `${track.playlistSource.id || ''}::${track.playlistSource.link || ''}`;
+            if (!sourceGroups.has(sourceKey)) {
+                sourceGroups.set(sourceKey, { count: 0, source: track.playlistSource });
+            }
+            sourceGroups.get(sourceKey).count += 1;
+        }
+
+        const primarySource = Array.from(sourceGroups.values())
+            .sort((a, b) => b.count - a.count)[0]?.source;
+
+        if (!primarySource) return;
+
+        const entry = ensurePlaylistSyncEntry(playlistPath);
+        if (!entry) return;
+
+        entry.source = {
+            link: primarySource.link || null,
+            type: primarySource.type || 'playlist',
+            id: primarySource.id || null,
+            name: primarySource.name || path.basename(playlistPath),
+            lastSyncedAt: new Date().toISOString(),
+        };
+
+        entry.tracks = {};
+
+        for (const movedTrack of movedTracks) {
+            const context = movedTrack.context;
+            if (!context?.spotifyUrl) continue;
+            if (context?.playlistSource?.id !== primarySource.id) continue;
+
+            entry.tracks[context.spotifyUrl] = {
+                spotifyUrl: context.spotifyUrl,
+                spotifyId: context.spotifyId || null,
+                name: context.name || '',
+                artist: context.artist || '',
+                durationMs: Number.isFinite(context.durationMs) ? context.durationMs : null,
+                position: Number.isFinite(movedTrack.position) ? movedTrack.position : null,
+                localPath: movedTrack.newPath,
+                updatedAt: new Date().toISOString(),
+            };
+        }
+
+        savePlaylistSyncCache();
+    }
+
     ipcMain.handle('create-playlist', async () => {
         if (lastDownloadedFiles.length === 0) return 'No files from the last session to create a playlist with.';
         if (!lastPlaylistName) {
@@ -2270,14 +2539,23 @@ app.whenReady().then(() => {
                 fs.mkdirSync(folderName, { recursive: true });
             }
             let movedCount = 0;
+            const movedTracks = [];
             for (const oldPath of lastDownloadedFiles) {
                 if (fs.existsSync(oldPath)) {
                     const newPath = path.join(folderName, path.basename(oldPath));
                     fs.renameSync(oldPath, newPath);
+                    const context = lastDownloadedTrackContexts[normalizePathKey(oldPath)] || null;
+                    movedTracks.push({ oldPath, newPath, position: movedCount, context });
                     movedCount++;
                 }
             }
+
+            if (hasPlaylistSourceContextForDownloads()) {
+                persistPlaylistSyncCacheFromMoves(folderName, movedTracks);
+            }
+
             lastDownloadedFiles = [];
+            lastDownloadedTrackContexts = {};
             stats.playlistsCreated = (stats.playlistsCreated || 0) + 1;
             saveStats();
             return `Successfully created playlist and moved ${movedCount} files to "${sanitizedPlaylistName}".`;
@@ -2325,8 +2603,8 @@ app.whenReady().then(() => {
     }
 
     async function getSpotifyTracks(link) {
-        const regex = /spotify\.com\/(playlist|album|track)\/([a-zA-Z0-9]+)/;
-        const match = link.match(regex);
+        const sourceInfo = parseSpotifyLinkInfo(link);
+        const match = sourceInfo ? [null, sourceInfo.type, sourceInfo.id] : null;
         if (!match) return { error: 'Invalid Spotify link' };
 
         const type = match[1];
@@ -2346,6 +2624,8 @@ app.whenReady().then(() => {
                         if (!item.track) return null;
                         const track = item.track;
                         return {
+                            spotifyUrl: track.external_urls?.spotify || (track.id ? `https://open.spotify.com/track/${track.id}` : null),
+                            spotifyId: track.id || null,
                             name: track.name,
                             artist: track.artists.map(a => a.name).join(', '),
                             durationMs: track.duration_ms,
@@ -2366,6 +2646,8 @@ app.whenReady().then(() => {
                 while (offset < total) {
                     const data = await spotifyApi.getAlbumTracks(id, { offset, limit: 50 });
                     tracks.push(...data.body.items.map(track => ({
+                        spotifyUrl: track.external_urls?.spotify || (track.id ? `https://open.spotify.com/track/${track.id}` : null),
+                        spotifyId: track.id || null,
                         name: track.name,
                         artist: track.artists.map(a => a.name).join(', '),
                         durationMs: track.duration_ms,
@@ -2376,12 +2658,14 @@ app.whenReady().then(() => {
                 const data = await spotifyApi.getTrack(id);
                 const track = data.body;
                 tracks.push({
+                    spotifyUrl: track.external_urls?.spotify || (track.id ? `https://open.spotify.com/track/${track.id}` : null),
+                    spotifyId: track.id || null,
                     name: track.name,
                     artist: track.artists.map(a => a.name).join(', '),
                     durationMs: track.duration_ms,
                 });
             }
-            return { tracks: tracks.filter(Boolean), playlistName };
+            return { tracks: tracks.filter(Boolean), playlistName, sourceInfo };
         } catch (error) {
             let userMessage = `Error fetching from Spotify: ${error.message}`;
             if (error.statusCode === 404) userMessage = 'Error: Spotify resource not found. Check if the link is correct and the playlist/album is public.';
@@ -2391,6 +2675,227 @@ app.whenReady().then(() => {
             return { error: userMessage };
         }
     }
+
+    function normalizeSpotifyIdentity(value) {
+        if (typeof value !== 'string') return '';
+        return value.trim().toLowerCase();
+    }
+
+    function isSpotifyTrackChanged(previousTrack, nextTrack) {
+        if (!previousTrack || !nextTrack) return true;
+        const prevName = normalizeSpotifyIdentity(previousTrack.name);
+        const nextName = normalizeSpotifyIdentity(nextTrack.name);
+        if (prevName !== nextName) return true;
+
+        const prevArtist = normalizeSpotifyIdentity(previousTrack.artist);
+        const nextArtist = normalizeSpotifyIdentity(nextTrack.artist);
+        if (prevArtist !== nextArtist) return true;
+
+        const prevDuration = Number.isFinite(previousTrack.durationMs) ? previousTrack.durationMs : null;
+        const nextDuration = Number.isFinite(nextTrack.durationMs) ? nextTrack.durationMs : null;
+        if (prevDuration === null || nextDuration === null) {
+            return prevDuration !== nextDuration;
+        }
+
+        return Math.abs(prevDuration - nextDuration) > 1500;
+    }
+
+    async function applySafeRenameOperations(renameOperations) {
+        if (!Array.isArray(renameOperations) || renameOperations.length === 0) return;
+
+        const staged = [];
+        const stamp = Date.now();
+        let tempIndex = 0;
+
+        for (const operation of renameOperations) {
+            if (!operation?.from || !operation?.to || operation.from === operation.to) continue;
+            if (!fs.existsSync(operation.from)) continue;
+
+            const ext = path.extname(operation.from);
+            const tmpPath = path.join(path.dirname(operation.from), `.__sl_sync_tmp_${stamp}_${tempIndex}${ext}`);
+            tempIndex += 1;
+            await fs.promises.rename(operation.from, tmpPath);
+            moveTrackTagsPath(operation.from, tmpPath);
+            staged.push({
+                from: operation.from,
+                tmpPath,
+                to: operation.to,
+            });
+        }
+
+        for (const operation of staged) {
+            if (fs.existsSync(operation.to)) {
+                await fs.promises.rm(operation.to, { force: true });
+            }
+            await fs.promises.rename(operation.tmpPath, operation.to);
+            moveTrackTagsPath(operation.tmpPath, operation.to);
+        }
+    }
+
+    async function syncPlaylistWithSource(playlistPath) {
+        if (!playlistPath || typeof playlistPath !== 'string') {
+            return { success: false, error: 'Playlist path is required.' };
+        }
+        if (!fs.existsSync(playlistPath)) {
+            return { success: false, error: 'Playlist folder does not exist.' };
+        }
+
+        const entry = getPlaylistSyncEntry(playlistPath);
+        if (!entry?.source?.link || entry.source.type !== 'playlist') {
+            return { success: false, error: 'This playlist has no Spotify source metadata to sync from yet.' };
+        }
+
+        await refreshSpotifyToken();
+        const spotifyFetchResult = await getSpotifyTracks(entry.source.link);
+        if (spotifyFetchResult?.error) {
+            return { success: false, error: spotifyFetchResult.error };
+        }
+
+        const remoteTracks = Array.isArray(spotifyFetchResult.tracks)
+            ? spotifyFetchResult.tracks.filter(track => track?.spotifyUrl)
+            : [];
+        const remotePlaylistNameRaw = spotifyFetchResult.playlistName || entry.source.name || path.basename(playlistPath);
+
+        let effectivePlaylistPath = playlistPath;
+        const remotePlaylistName = sanitizeFilename(remotePlaylistNameRaw);
+        const currentPlaylistName = path.basename(playlistPath);
+        if (remotePlaylistName && remotePlaylistName !== currentPlaylistName) {
+            const renamedPath = path.join(path.dirname(playlistPath), remotePlaylistName);
+            if (!fs.existsSync(renamedPath)) {
+                await fs.promises.rename(playlistPath, renamedPath);
+                movePlaylistTagsPath(playlistPath, renamedPath);
+                movePlaylistSyncEntry(playlistPath, renamedPath);
+                effectivePlaylistPath = renamedPath;
+            }
+        }
+
+        const freshEntry = getPlaylistSyncEntry(effectivePlaylistPath) || entry;
+        const cachedTracks = freshEntry?.tracks || {};
+        const remoteTrackByUrl = new Map(remoteTracks.map(track => [track.spotifyUrl, track]));
+        const cachedUrls = Object.keys(cachedTracks);
+        const removedUrls = cachedUrls.filter(url => !remoteTrackByUrl.has(url));
+        const addedUrls = remoteTracks.filter(track => !cachedTracks[track.spotifyUrl]).map(track => track.spotifyUrl);
+
+        const changedUrls = [];
+        for (const track of remoteTracks) {
+            const previous = cachedTracks[track.spotifyUrl];
+            if (!previous) continue;
+            const localPath = previous.localPath;
+            const localMissing = !localPath || !fs.existsSync(localPath);
+            if (localMissing || isSpotifyTrackChanged(previous, track)) {
+                changedUrls.push(track.spotifyUrl);
+            }
+        }
+
+        let removedCount = 0;
+        for (const spotifyUrl of removedUrls) {
+            const cachedTrack = cachedTracks[spotifyUrl];
+            if (cachedTrack?.localPath && fs.existsSync(cachedTrack.localPath)) {
+                await fs.promises.rm(cachedTrack.localPath, { force: true });
+                removedCount += 1;
+            }
+            delete cachedTracks[spotifyUrl];
+        }
+
+        const urlsToDownload = new Set([...addedUrls, ...changedUrls]);
+        const downloadedPathByUrl = new Map();
+        for (const spotifyUrl of urlsToDownload) {
+            const track = remoteTrackByUrl.get(spotifyUrl);
+            if (!track) continue;
+
+            const query = `${track.name} ${track.artist}`;
+            const resolved = await resolveTrackLink(query, track.name, track.durationMs);
+            const temporaryOutputDir = path.join(effectivePlaylistPath, '.__sync_tmp__');
+            fs.mkdirSync(temporaryOutputDir, { recursive: true });
+
+            const filePath = await downloadItem(
+                {
+                    youtubeLink: resolved.link,
+                    trackName: track.name,
+                    outputDir: temporaryOutputDir,
+                    queuePosition: 1,
+                    queueTotal: 1,
+                    queueLabel: 'Playlist Sync',
+                },
+                0,
+                1,
+                () => {}
+            );
+
+            downloadedPathByUrl.set(spotifyUrl, filePath);
+        }
+
+        const renameOperations = [];
+        const nextTracks = {};
+
+        for (let index = 0; index < remoteTracks.length; index += 1) {
+            const track = remoteTracks[index];
+            const spotifyUrl = track.spotifyUrl;
+            const previous = cachedTracks[spotifyUrl] || null;
+            const downloadedPath = downloadedPathByUrl.get(spotifyUrl) || null;
+            const sourcePath = downloadedPath || previous?.localPath || null;
+            if (!sourcePath || !fs.existsSync(sourcePath)) continue;
+
+            const extension = path.extname(sourcePath) || `.${config.fileExtension || 'm4a'}`;
+            const desiredBaseName = `${String(index + 1).padStart(3, '0')} - ${sanitizeFilename(track.name) || 'Track'}`;
+            const desiredPath = path.join(effectivePlaylistPath, `${desiredBaseName}${extension}`);
+
+            if (normalizePathKey(sourcePath) !== normalizePathKey(desiredPath)) {
+                renameOperations.push({ from: sourcePath, to: desiredPath });
+            }
+
+            nextTracks[spotifyUrl] = {
+                spotifyUrl,
+                spotifyId: track.spotifyId || null,
+                name: track.name,
+                artist: track.artist,
+                durationMs: Number.isFinite(track.durationMs) ? track.durationMs : null,
+                position: index,
+                localPath: desiredPath,
+                updatedAt: new Date().toISOString(),
+            };
+        }
+
+        await applySafeRenameOperations(renameOperations);
+
+        const temporarySyncDir = path.join(effectivePlaylistPath, '.__sync_tmp__');
+        if (fs.existsSync(temporarySyncDir)) {
+            await fs.promises.rm(temporarySyncDir, { recursive: true, force: true });
+        }
+
+        const syncedEntry = ensurePlaylistSyncEntry(effectivePlaylistPath);
+        syncedEntry.source = {
+            ...freshEntry.source,
+            name: remotePlaylistNameRaw,
+            lastSyncedAt: new Date().toISOString(),
+        };
+        syncedEntry.tracks = nextTracks;
+        savePlaylistSyncCache();
+
+        return {
+            success: true,
+            playlistPath: effectivePlaylistPath,
+            playlistRenamed: effectivePlaylistPath !== playlistPath,
+            summary: {
+                remoteCount: remoteTracks.length,
+                added: addedUrls.length,
+                changed: changedUrls.length,
+                removed: removedUrls.length,
+                filesRemoved: removedCount,
+            },
+        };
+    }
+
+    ipcMain.handle('sync-playlist-with-source', async (_event, playlistPath) => {
+        try {
+            return await syncPlaylistWithSource(playlistPath);
+        } catch (error) {
+            return {
+                success: false,
+                error: error?.message || 'Playlist sync failed unexpectedly.',
+            };
+        }
+    });
 
     function sanitizeFilename(name) {
         return name.replace(/[<>:"/\\|?*]/g, '_').replace(/\s+/g, ' ').trim();

@@ -175,6 +175,39 @@ async function showPlaylistInfoFromContext(playlist) {
     await ctx.helpers.showInfoDialog('Playlist Details', buildPlaylistDetailsMessage(result.details), { confirmText: 'Close' });
 }
 
+async function updatePlaylistFromContext(playlist) {
+    if (!playlist?.path) return;
+
+    const confirmed = await ctx.helpers.showConfirmDialog(
+        'Update Playlist',
+        `Sync "${playlist.name}" with its original Spotify playlist source? This can add, remove, rename, or replace tracks to match Spotify.`,
+        { confirmText: 'Update', cancelText: 'Cancel' }
+    );
+
+    if (!confirmed) return;
+
+    const result = await window.electronAPI.syncPlaylistWithSource(playlist.path);
+    if (!result?.success) {
+        ctx.helpers.showNotification('error', 'Update Failed', result?.error || 'Could not sync playlist from source.');
+        return;
+    }
+
+    const summary = result.summary || {};
+    ctx.helpers.showNotification(
+        'success',
+        'Playlist Updated',
+        `Added ${summary.added || 0}, changed ${summary.changed || 0}, removed ${summary.removed || 0}.`
+    );
+
+    await pmRenderPlaylists();
+    if (ctx.state.pmSelectedPlaylistPath) {
+        const pathAfterSync = result.playlistPath || ctx.state.pmSelectedPlaylistPath;
+        ctx.state.pmSelectedPlaylistPath = pathAfterSync;
+        await pmRenderTracks(pathAfterSync);
+    }
+    if (ctx.state.isPlayerInitialized) ctx.playerAPI?.loadAndRenderPlaylists?.();
+}
+
 async function pmRenderTracks(playlistPath) {
     const { pmTracksContainer, pmTrackSearchInput, moveTrackNameEl, moveTrackDestinationSelect, moveTrackModal } = ctx.elements;
     log('Rendering tracks', { playlistPath });
@@ -384,6 +417,10 @@ async function pmRenderPlaylists() {
                     {
                         label: 'More info',
                         action: () => { void showPlaylistInfoFromContext(p); }
+                    },
+                    {
+                        label: 'Update playlist',
+                        action: () => { void updatePlaylistFromContext(p); }
                     },
                     { type: 'separator' },
                     {
