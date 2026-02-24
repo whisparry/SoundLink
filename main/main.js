@@ -59,6 +59,7 @@ const trimUndoManifestPath = path.join(app.getPath('userData'), 'trim-undo-manif
 const ytdlpDir = isDev ? path.join(__dirname, 'yt-dlp') : path.join(process.resourcesPath, 'yt-dlp');
 const userDataPluginRoot = path.join(app.getPath('userData'), 'yt-dlp-plugins');
 const ytdlpGetPotPluginDir = path.join(userDataPluginRoot, 'yt-dlp-get-pot');
+const ytdlpThreadInstancesDir = path.join(app.getPath('userData'), 'yt-dlp-thread-instances');
 
 // --- STATE VARIABLES ---
 let config = {};
@@ -73,6 +74,7 @@ let mainWindow;
 let tray = null;
 let activeProcesses = new Set();
 let ytdlpExecutables = [];
+let ytdlpThreadInstances = [];
 let ytdlpInstanceIndex = 0;
 let lastDownloadedFiles = [];
 let lastPlaylistName = null;
@@ -215,15 +217,53 @@ function findYtdlpExecutables() {
             ? withVersion.filter(entry => entry.versionDate === latestVersion).map(entry => entry.filePath)
             : withVersion.slice(0, 1).map(entry => entry.filePath);
 
-        ytdlpExecutables = latestExecutables.length > 0
-            ? Array.from({ length: MAX_DOWNLOAD_THREADS }, (_, index) => latestExecutables[index % latestExecutables.length])
-            : [];
+        ytdlpExecutables = latestExecutables;
+        ytdlpThreadInstances = [];
+        ytdlpInstanceIndex = 0;
 
-        if (ytdlpExecutables.length === 0) {
+        if (fs.existsSync(ytdlpThreadInstancesDir)) {
+            fs.rmSync(ytdlpThreadInstancesDir, { recursive: true, force: true });
+        }
+        fs.mkdirSync(ytdlpThreadInstancesDir, { recursive: true });
+
+        if (latestExecutables.length > 0) {
+            const pluginSourcePath = ensureYtdlpGetPotPlugin();
+
+            for (let index = 0; index < MAX_DOWNLOAD_THREADS; index++) {
+                const sourceExecutablePath = latestExecutables[index % latestExecutables.length];
+                const threadName = `yt-dlp Thread ${index + 1}`;
+                const threadRootPath = path.join(ytdlpThreadInstancesDir, threadName);
+                const threadExecutablePath = path.join(threadRootPath, path.basename(sourceExecutablePath));
+                const threadPluginPath = path.join(threadRootPath, 'plugins');
+
+                fs.mkdirSync(threadRootPath, { recursive: true });
+                fs.copyFileSync(sourceExecutablePath, threadExecutablePath);
+
+                let resolvedPluginPath = null;
+                if (pluginSourcePath && fs.existsSync(pluginSourcePath)) {
+                    copyDirectoryRecursive(pluginSourcePath, threadPluginPath);
+                    if (isValidYtdlpPluginDirectory(threadPluginPath)) {
+                        resolvedPluginPath = threadPluginPath;
+                    }
+                }
+
+                ytdlpThreadInstances.push({
+                    threadIndex: index + 1,
+                    threadName,
+                    rootPath: threadRootPath,
+                    executablePath: threadExecutablePath,
+                    pluginPath: resolvedPluginPath,
+                    sourceExecutablePath,
+                });
+            }
+        }
+
+        if (ytdlpThreadInstances.length === 0) {
             console.error(`No 'yt-dlp*.exe' executables found in ${ytdlpDir}`);
         } else {
-            const selected = ytdlpExecutables[0];
-            console.log(`Using ${ytdlpExecutables.length} yt-dlp worker slot(s) from ${latestExecutables.length} executable(s), selected baseline: ${path.basename(selected)}`);
+            const selected = ytdlpThreadInstances[0];
+            const pluginEnabledCount = ytdlpThreadInstances.filter(instance => instance.pluginPath).length;
+            console.log(`Prepared ${ytdlpThreadInstances.length} yt-dlp thread instance folder(s) from ${latestExecutables.length} executable(s), baseline: ${path.basename(selected.executablePath)}, plugin-ready: ${pluginEnabledCount}`);
         }
     } catch (error) {
         console.error('Failed to find yt-dlp executables:', error);
@@ -353,11 +393,11 @@ function saveCache() {
     }
 }
 
-function getNextYtdlpPath() {
-    if (ytdlpExecutables.length === 0) return null;
-    const path = ytdlpExecutables[ytdlpInstanceIndex];
-    ytdlpInstanceIndex = (ytdlpInstanceIndex + 1) % ytdlpExecutables.length;
-    return path;
+function getNextYtdlpInstance() {
+    if (ytdlpThreadInstances.length === 0) return null;
+    const instance = ytdlpThreadInstances[ytdlpInstanceIndex];
+    ytdlpInstanceIndex = (ytdlpInstanceIndex + 1) % ytdlpThreadInstances.length;
+    return instance;
 }
 
 function copyDirectoryRecursive(sourceDir, destinationDir) {
@@ -475,7 +515,7 @@ function getYtdlpPluginFlag() {
         return cachedYtdlpPluginFlag;
     }
 
-    const ytdlpPath = ytdlpExecutables[0] || getNextYtdlpPath();
+    const ytdlpPath = ytdlpThreadInstances[0]?.executablePath || ytdlpExecutables[0];
     if (!ytdlpPath) {
         cachedYtdlpPluginFlag = null;
         return null;
@@ -542,7 +582,7 @@ function getNodeRuntimePath() {
     }
 }
 
-function getYtdlpCommonArgs() {
+function getYtdlpCommonArgs(ytdlpInstance = null) {
     const args = [
         '--no-update',
         '--extractor-args', 'youtube:player-client=android,web',
@@ -560,7 +600,7 @@ function getYtdlpCommonArgs() {
         args.push('--extractor-args', `youtubepot-bgutilscript:script_path=${normalizedScriptPath}`);
     }
 
-    const pluginPath = ensureYtdlpGetPotPlugin();
+    const pluginPath = ytdlpInstance?.pluginPath || ensureYtdlpGetPotPlugin();
     if (pluginPath) {
         const pluginFlag = getYtdlpPluginFlag();
         if (pluginFlag) {
@@ -913,7 +953,7 @@ app.whenReady().then(() => {
         mainWindow.close();
     });
 
-    ipcMain.handle('get-ytdlp-count', () => ytdlpExecutables.length);
+    ipcMain.handle('get-ytdlp-count', () => ytdlpThreadInstances.length);
 
     ipcMain.handle('get-settings', () => config);
 
@@ -1834,11 +1874,11 @@ app.whenReady().then(() => {
 
     ipcMain.on('start-download', async (event, linksArray) => {
         if (!linksArray || linksArray.length === 0) return mainWindow.webContents.send('update-status', 'No links provided.', true, { success: false });
-        if (ytdlpExecutables.length === 0) return mainWindow.webContents.send('update-status', 'Error: No yt-dlp executable found.', true, { success: false });
+        if (ytdlpThreadInstances.length === 0) return mainWindow.webContents.send('update-status', 'Error: No yt-dlp executable found.', true, { success: false });
 
-        const pluginPath = ensureYtdlpGetPotPlugin();
-        if (pluginPath) {
-            mainWindow.webContents.send('update-status', `yt-dlp plugin ready: ${pluginPath}`);
+        const pluginReadyInstance = ytdlpThreadInstances.find(instance => instance.pluginPath);
+        if (pluginReadyInstance) {
+            mainWindow.webContents.send('update-status', `yt-dlp plugin ready: ${pluginReadyInstance.pluginPath}`);
         } else {
             mainWindow.webContents.send('update-status', 'Warning: yt-dlp-get-pot plugin not found in resources; continuing without plugin override.');
         }
@@ -2310,9 +2350,9 @@ app.whenReady().then(() => {
     function runYtdlp(args) {
         return new Promise((resolve, reject) => {
             if (isDownloadCancelled) return reject(new Error('Operation cancelled'));
-            const ytdlpPath = getNextYtdlpPath();
-            if (!ytdlpPath) return reject(new Error('No yt-dlp executable found.'));
-            const proc = spawn(ytdlpPath, [...getYtdlpCommonArgs(), ...args]);
+            const ytdlpInstance = getNextYtdlpInstance();
+            if (!ytdlpInstance) return reject(new Error('No yt-dlp executable found.'));
+            const proc = spawn(ytdlpInstance.executablePath, [...getYtdlpCommonArgs(ytdlpInstance), ...args], { cwd: ytdlpInstance.rootPath });
             activeProcesses.add(proc);
             let stdout = '', stderr = '';
 
@@ -2501,9 +2541,9 @@ app.whenReady().then(() => {
 
         return new Promise((resolve, reject) => {
             if (isDownloadCancelled) return reject(new Error('Download cancelled'));
-            const ytdlpPath = getNextYtdlpPath();
-            if (!ytdlpPath) return reject(new Error('No yt-dlp executable found.'));
-            const proc = spawn(ytdlpPath, [...getYtdlpCommonArgs(), ...args]);
+            const ytdlpInstance = getNextYtdlpInstance();
+            if (!ytdlpInstance) return reject(new Error('No yt-dlp executable found.'));
+            const proc = spawn(ytdlpInstance.executablePath, [...getYtdlpCommonArgs(ytdlpInstance), ...args], { cwd: ytdlpInstance.rootPath });
             activeProcesses.add(proc);
             let finalPath = '';
             let stdoutBuffer = '';
