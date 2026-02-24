@@ -144,10 +144,18 @@ function updateUI() {
 
 function updateNowPlaying() {
     const { nowPlaying } = ctx.elements;
+    const titleBarTrack = document.getElementById('title-bar-track');
+    let displayTrackName = 'Nothing playing';
+
     if (currentTrackIndex > -1 && currentTracklist[currentTrackIndex]) {
-        nowPlaying.textContent = currentTracklist[currentTrackIndex].displayName;
+        displayTrackName = currentTracklist[currentTrackIndex].displayName;
+        nowPlaying.textContent = displayTrackName;
     } else {
         nowPlaying.textContent = 'Select a song to play';
+    }
+
+    if (titleBarTrack) {
+        titleBarTrack.textContent = displayTrackName;
     }
 
     emitPlayerStateUpdate();

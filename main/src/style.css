@@ -48,9 +48,54 @@ body, html {
     background-color: var(--bg-secondary);
     -webkit-app-region: drag;
     display: flex;
-    justify-content: flex-end;
+    justify-content: space-between;
     align-items: center;
     z-index: 100;
+    padding-left: 12px;
+    box-sizing: border-box;
+}
+
+.title-bar-title {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    max-width: calc(100% - 42px);
+    color: var(--text-primary);
+    pointer-events: none;
+}
+
+.title-bar-brand {
+    font-weight: 800;
+    font-style: italic;
+    font-size: 35px;
+    line-height: 1;
+    white-space: nowrap;
+}
+
+.title-bar-dot {
+    font-weight: 800;
+    font-size: 20px;
+    line-height: 1;
+    color: var(--text-secondary);
+    flex: 0 0 auto;
+}
+
+.title-bar-track {
+    font-weight: 800;
+    font-style: normal;
+    font-size: 22px;
+    line-height: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.title-bar-controls {
+    display: flex;
+    align-items: stretch;
+    margin-left: 12px;
 }
 
 .title-bar-btn {
