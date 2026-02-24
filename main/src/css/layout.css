@@ -18,7 +18,7 @@
 .title-bar-title {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 5px;
     min-width: 0;
     max-width: calc(100% - 40px);
     color: var(--text-primary);
@@ -28,14 +28,14 @@
 .title-bar-brand {
     font-weight: 800;
     font-style: italic;
-    font-size: 35px;
+    font-size: 15px;
     line-height: 1;
     white-space: nowrap;
 }
 
 .title-bar-dot {
     font-weight: 800;
-    font-size: 20px;
+    font-size: 12px;
     line-height: 1;
     color: var(--text-secondary);
     flex: 0 0 auto;
@@ -44,7 +44,7 @@
 .title-bar-track {
     font-weight: 800;
     font-style: normal;
-    font-size: 22px;
+    font-size: 12px;
     line-height: 1;
     min-width: 0;
     overflow: hidden;
