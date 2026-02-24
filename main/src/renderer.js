@@ -94,6 +94,7 @@ window.addEventListener('DOMContentLoaded', () => {
     const enableSmartPlaylistsInput = document.getElementById('enableSmartPlaylists');
     const libraryPerformanceModeInput = document.getElementById('libraryPerformanceMode');
     const skipManualLinkPromptInput = document.getElementById('skipManualLinkPrompt');
+    const disableToastsInput = document.getElementById('disableToasts');
     const durationToleranceSecondsInput = document.getElementById('durationToleranceSeconds');
     const silenceTrimThresholdDbInput = document.getElementById('silenceTrimThresholdDb');
     const updateYtdlpBtn = document.getElementById('update-ytdlp-btn');
@@ -418,6 +419,7 @@ window.addEventListener('DOMContentLoaded', () => {
             enableSmartPlaylists: enableSmartPlaylistsInput.checked,
             libraryPerformanceMode: libraryPerformanceModeInput.checked,
             skipManualLinkPrompt: skipManualLinkPromptInput.checked,
+            disableToasts: disableToastsInput.checked,
             durationToleranceSeconds: parseInt(durationToleranceSecondsInput.value, 10),
             silenceTrimThresholdDb: parseInt(silenceTrimThresholdDbInput.value, 10),
             playerVolume: Number.parseFloat(volumeSlider.value),
@@ -518,6 +520,7 @@ window.addEventListener('DOMContentLoaded', () => {
             spectrogramColorInput,
             enableSmartPlaylistsInput,
             libraryPerformanceModeInput,
+            disableToastsInput,
             updateYtdlpBtn,
             clearCacheBtn,
             spotifyLink,
@@ -889,6 +892,13 @@ window.addEventListener('DOMContentLoaded', () => {
             state.activeToastNotificationId = null;
         }
 
+        if (disableToastsInput?.checked) {
+            if (state.toastTimer) clearTimeout(state.toastTimer);
+            toastNotification.classList.add('hidden');
+            state.activeToastNotificationId = null;
+            return;
+        }
+
         if (state.toastTimer) clearTimeout(state.toastTimer);
         toastTitle.textContent = title;
         toastMessage.textContent = message;
@@ -1160,13 +1170,14 @@ window.addEventListener('DOMContentLoaded', () => {
             libraryPerformanceModeInput.checked = currentConfig.libraryPerformanceMode !== false;
             setVisualThemeSyncEnabled(visualThemeSyncInput.checked);
             skipManualLinkPromptInput.checked = currentConfig.skipManualLinkPrompt || false;
+            disableToastsInput.checked = currentConfig.disableToasts || false;
             durationToleranceSecondsInput.value = currentConfig.durationToleranceSeconds || 20;
             silenceTrimThresholdDbInput.value = currentConfig.silenceTrimThresholdDb || 35;
             spotifySearchLimitInput.value = currentConfig.spotifySearchLimit || 10;
             const savedPlayerVolume = Number.parseFloat(currentConfig.playerVolume);
             volumeSlider.value = Number.isFinite(savedPlayerVolume) ? Math.min(Math.max(savedPlayerVolume, 0), 1) : 1;
         }
-        [fileExtensionInput, downloadThreadsInput, clientIdInput, clientSecretInput, autoCreatePlaylistInput, hideRefreshButtonsInput, hidePlaylistCountsInput, hideTrackNumbersInput, normalizeVolumeInput, hideSearchBarsInput, hideMixButtonsInput, visualThemeSyncInput, spectrogramColorInput, enableSmartPlaylistsInput, libraryPerformanceModeInput, spotifySearchLimitInput, skipManualLinkPromptInput, durationToleranceSecondsInput, silenceTrimThresholdDbInput].forEach(input => input.addEventListener('change', saveSettings));
+        [fileExtensionInput, downloadThreadsInput, clientIdInput, clientSecretInput, autoCreatePlaylistInput, hideRefreshButtonsInput, hidePlaylistCountsInput, hideTrackNumbersInput, normalizeVolumeInput, hideSearchBarsInput, hideMixButtonsInput, visualThemeSyncInput, spectrogramColorInput, enableSmartPlaylistsInput, libraryPerformanceModeInput, spotifySearchLimitInput, skipManualLinkPromptInput, disableToastsInput, durationToleranceSecondsInput, silenceTrimThresholdDbInput].forEach(input => input.addEventListener('change', saveSettings));
         hideRefreshButtonsInput.addEventListener('change', () => body.classList.toggle('hide-refresh-buttons', hideRefreshButtonsInput.checked));
         hidePlaylistCountsInput.addEventListener('change', () => body.classList.toggle('hide-playlist-counts', hidePlaylistCountsInput.checked));
         hideTrackNumbersInput.addEventListener('change', () => body.classList.toggle('hide-track-numbers', hideTrackNumbersInput.checked));
@@ -1464,6 +1475,7 @@ window.addEventListener('DOMContentLoaded', () => {
         spectrogramColorInput.value = state.spectrogramColor;
         applySpectrogramColorFromHex(state.spectrogramColor);
         skipManualLinkPromptInput.checked = defaultSettings.skipManualLinkPrompt || false;
+        disableToastsInput.checked = defaultSettings.disableToasts || false;
         durationToleranceSecondsInput.value = defaultSettings.durationToleranceSeconds || 20;
         silenceTrimThresholdDbInput.value = defaultSettings.silenceTrimThresholdDb || 35;
         volumeSlider.value = Number.isFinite(Number.parseFloat(defaultSettings.playerVolume))

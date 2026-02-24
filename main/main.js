@@ -281,6 +281,9 @@ function loadConfig() {
             if (!Number.isFinite(Number.parseFloat(config.playerVolume))) {
                 config.playerVolume = 1;
             }
+            if (typeof config.disableToasts !== 'boolean') {
+                config.disableToasts = false;
+            }
             if (typeof config.spectrogramColor !== 'string' || !/^#[\da-f]{6}$/i.test(config.spectrogramColor)) {
                 config.spectrogramColor = '#3b82f6';
             }
@@ -302,6 +305,7 @@ function loadConfig() {
                 enableSmartPlaylists: true,
                 libraryPerformanceMode: true,
                 skipManualLinkPrompt: false,
+                disableToasts: false,
                 durationToleranceSeconds: 20,
                 silenceTrimThresholdDb: 35,
                 playerVolume: 1,
@@ -1040,6 +1044,7 @@ app.whenReady().then(() => {
             enableSmartPlaylists: true,
             libraryPerformanceMode: true,
             skipManualLinkPrompt: false,
+            disableToasts: false,
             durationToleranceSeconds: 20,
             silenceTrimThresholdDb: 35,
             playerVolume: 1,
@@ -1870,7 +1875,13 @@ app.whenReady().then(() => {
     });
 
     ipcMain.on('start-download', async (event, linksArray) => {
-        if (!linksArray || linksArray.length === 0) return mainWindow.webContents.send('update-status', 'No links provided.', true, { success: false });
+        const queuedLinks = Array.isArray(linksArray)
+            ? linksArray
+                .map(link => (typeof link === 'string' ? link.trim() : ''))
+                .filter(Boolean)
+            : [];
+
+        if (queuedLinks.length === 0) return mainWindow.webContents.send('update-status', 'No links provided.', true, { success: false });
         if (ytdlpThreadInstances.length === 0) return mainWindow.webContents.send('update-status', 'Error: No yt-dlp executable found.', true, { success: false });
 
         const pluginReadyInstance = ytdlpThreadInstances.find(instance => instance.pluginPath);
@@ -1884,27 +1895,35 @@ app.whenReady().then(() => {
         lastDownloadedFiles = [];
         lastPlaylistName = null;
         isDownloadCancelled = false;
-        mainWindow.webContents.send('update-status', 'Starting download process...');
+        mainWindow.webContents.send('update-status', `Starting download queue with ${queuedLinks.length} item(s)...`);
 
         try {
             await refreshSpotifyToken();
             const configuredThreads = Number.parseInt(config.downloadThreads, 10);
             const requestedThreads = Number.isFinite(configuredThreads) && configuredThreads > 0 ? configuredThreads : 3;
             const concurrency = Math.max(1, Math.min(requestedThreads, MAX_DOWNLOAD_THREADS));
+            const downloadConcurrency = 1;
             const itemsToProcess = [];
             let trackIndex = 0;
             let spotifyLinkCount = 0;
             let youtubeLinkCount = 0;
 
-            for (const link of linksArray) {
+            for (const [queueIndex, link] of queuedLinks.entries()) {
                 if (isDownloadCancelled) break;
+                const queuePosition = queueIndex + 1;
+                mainWindow.webContents.send('update-status', `Queue ${queuePosition}/${queuedLinks.length}: preparing link...`);
+
                 if (link.includes('spotify.com')) {
                     spotifyLinkCount++;
                     const { tracks, playlistName, error } = await getSpotifyTracks(link);
                     if (error) {
-                        mainWindow.webContents.send('update-status', `Error processing Spotify link: ${error}`);
+                        mainWindow.webContents.send('update-status', `Queue ${queuePosition}/${queuedLinks.length}: error processing Spotify link: ${error}`);
                         continue;
                     }
+
+                    const playlistDisplayName = playlistName || `Playlist ${queuePosition}`;
+                    const playlistFolderName = sanitizeFilename(playlistDisplayName) || `Playlist ${queuePosition}`;
+
                     if (playlistName && !lastPlaylistName) lastPlaylistName = playlistName;
                     if (tracks) {
                         for (const track of tracks) {
@@ -1915,12 +1934,24 @@ app.whenReady().then(() => {
                                 metadata: track.metadata,
                                 durationMs: track.durationMs,
                                 index: trackIndex++,
+                                queuePosition,
+                                queueTotal: queuedLinks.length,
+                                playlistFolderName,
+                                playlistDisplayName,
                             });
                         }
                     }
                 } else {
                     youtubeLinkCount++;
-                    itemsToProcess.push({ type: 'direct', link: link, index: trackIndex++ });
+                    itemsToProcess.push({
+                        type: 'direct',
+                        link,
+                        index: trackIndex++,
+                        queuePosition,
+                        queueTotal: queuedLinks.length,
+                        playlistFolderName: `Queue ${queuePosition}`,
+                        playlistDisplayName: `Queue ${queuePosition}`,
+                    });
                 }
             }
 
@@ -1929,7 +1960,7 @@ app.whenReady().then(() => {
             stats.totalLinksProcessed = (stats.totalLinksProcessed || 0) + totalItems;
             stats.spotifyLinksProcessed = (stats.spotifyLinksProcessed || 0) + spotifyLinkCount;
             stats.youtubeLinksProcessed = (stats.youtubeLinksProcessed || 0) + youtubeLinkCount;
-            mainWindow.webContents.send('update-status', `Phase 1/2: Finding links for ${totalItems} tracks...`);
+            mainWindow.webContents.send('update-status', `Phase 1/2: Finding links for ${totalItems} track(s) across ${queuedLinks.length} queue item(s)...`);
 
             const downloadTimingStats = ensureDownloadTimingStatsShape(stats);
 
@@ -2065,20 +2096,41 @@ app.whenReady().then(() => {
                     try {
                         let youtubeLink;
                         let trackName;
+                        let playlistFolderName = item.playlistFolderName;
+                        let playlistDisplayName = item.playlistDisplayName;
                         if (item.type === 'search') {
                             const resolved = await resolveTrackLink(item.query, item.name, item.durationMs);
                             youtubeLink = resolved.link;
                             trackName = item.name;
-                            mainWindow.webContents.send('update-status', `🔗 (${item.index + 1}/${totalItems}) Found ${resolved.source} link for: ${trackName}`);
+                            mainWindow.webContents.send('update-status', `🔗 [Queue ${item.queuePosition}/${item.queueTotal}] (${item.index + 1}/${totalItems}) Found ${resolved.source} link for: ${trackName}`);
                         } else { // 'direct'
                             youtubeLink = item.link;
                             trackName = await getYouTubeTitle(item.link);
-                            mainWindow.webContents.send('update-status', `🔗 (${item.index + 1}/${totalItems}) Found title: ${trackName}`);
+                            if (!playlistDisplayName || playlistDisplayName.startsWith('Queue ')) {
+                                playlistDisplayName = trackName || playlistDisplayName;
+                            }
+                            if (!playlistFolderName || playlistFolderName.startsWith('Queue ')) {
+                                playlistFolderName = sanitizeFilename(playlistDisplayName || `Queue ${item.queuePosition}`) || `Queue ${item.queuePosition}`;
+                            }
+                            mainWindow.webContents.send('update-status', `🔗 [Queue ${item.queuePosition}/${item.queueTotal}] (${item.index + 1}/${totalItems}) Found title: ${trackName}`);
                         }
-                        itemsToDownload.push({ youtubeLink, trackName, index: item.index, metadata: item.metadata });
+
+                        const outputDir = path.join(downloadsDir, playlistFolderName);
+                        fs.mkdirSync(outputDir, { recursive: true });
+
+                        itemsToDownload.push({
+                            youtubeLink,
+                            trackName,
+                            index: item.index,
+                            metadata: item.metadata,
+                            outputDir,
+                            queuePosition: item.queuePosition,
+                            queueTotal: item.queueTotal,
+                            queueLabel: playlistDisplayName,
+                        });
                     } catch (error) {
                         if (!isDownloadCancelled) {
-                            mainWindow.webContents.send('update-status', `❌ Failed to find link for "${item.name || item.link}": ${error.message}`);
+                            mainWindow.webContents.send('update-status', `❌ [Queue ${item.queuePosition}/${item.queueTotal}] Failed to find link for "${item.name || item.link}": ${error.message}`);
                             stats.songsFailed = (stats.songsFailed || 0) + 1;
                         }
                     } finally {
@@ -2108,7 +2160,7 @@ app.whenReady().then(() => {
                 return;
             }
 
-            mainWindow.webContents.send('update-status', `Phase 2/2: Downloading ${totalItemsToDownload} tracks...`);
+            mainWindow.webContents.send('update-status', `Phase 2/2: Downloading ${totalItemsToDownload} track(s) sequentially through ${queuedLinks.length} queue item(s)...`);
 
             const fileProgress = new Array(totalItemsToDownload).fill(0);
             const activeTrackTimingEstimates = new Array(totalItemsToDownload).fill(null);
@@ -2181,7 +2233,7 @@ app.whenReady().then(() => {
                     }
                 }
             };
-            await Promise.all(Array.from({ length: concurrency }, downloadWorker));
+            await Promise.all(Array.from({ length: downloadConcurrency }, downloadWorker));
 
             if (!isDownloadCancelled) {
                 if (totalItemsToDownload > 0) {
@@ -2374,6 +2426,28 @@ app.whenReady().then(() => {
         return safeSeconds * 1000;
     }
 
+    function parseDurationToMs(durationText) {
+        if (typeof durationText !== 'string') return null;
+        const trimmed = durationText.trim();
+        if (!trimmed) return null;
+
+        const numericSeconds = Number.parseFloat(trimmed);
+        if (Number.isFinite(numericSeconds)) {
+            return Math.round(numericSeconds * 1000);
+        }
+
+        const timeParts = trimmed.split(':').map(part => Number.parseInt(part, 10));
+        if (timeParts.length >= 2 && timeParts.every(value => Number.isFinite(value) && value >= 0)) {
+            let seconds = 0;
+            for (const part of timeParts) {
+                seconds = (seconds * 60) + part;
+            }
+            return Math.round(seconds * 1000);
+        }
+
+        return null;
+    }
+
     function parseSearchCandidates(rawOutput) {
         return rawOutput
             .split(/\r?\n/)
@@ -2381,10 +2455,9 @@ app.whenReady().then(() => {
             .filter(Boolean)
             .map(line => {
                 const [url = '', durationText = ''] = line.split('\t');
-                const parsedDurationSec = Number.parseFloat(durationText);
                 return {
                     url: url.trim(),
-                    durationMs: Number.isFinite(parsedDurationSec) ? Math.round(parsedDurationSec * 1000) : null,
+                    durationMs: parseDurationToMs(durationText),
                 };
             })
             .filter(candidate => candidate.url);
@@ -2401,7 +2474,12 @@ app.whenReady().then(() => {
         return Math.abs(candidateDurationMs - expectedDurationMs) <= getDurationToleranceMs();
     }
 
-    async function searchCandidates(providerPrefix, query, expectedDurationMs, maxResults = 5) {
+    async function searchCandidates(providerPrefix, query, expectedDurationMs, maxResults = 5, options = {}) {
+        const {
+            allowClosestMatch = false,
+            allowFallbackAny = false,
+        } = options;
+
         const rawOutput = await runYtdlp([
             '--flat-playlist',
             '--print', '%(webpage_url)s\t%(duration)s',
@@ -2409,7 +2487,28 @@ app.whenReady().then(() => {
         ]);
 
         const candidates = parseSearchCandidates(rawOutput);
-        return candidates.find(candidate => isDurationMatch(candidate.durationMs, expectedDurationMs)) || null;
+        if (candidates.length === 0) return null;
+
+        const strictMatch = candidates.find(candidate => isDurationMatch(candidate.durationMs, expectedDurationMs));
+        if (strictMatch) return strictMatch;
+
+        if (allowClosestMatch && Number.isFinite(expectedDurationMs) && expectedDurationMs > 0) {
+            const candidatesWithDuration = candidates.filter(candidate => Number.isFinite(candidate.durationMs) && candidate.durationMs > 0);
+            if (candidatesWithDuration.length > 0) {
+                const closest = candidatesWithDuration.reduce((best, candidate) => {
+                    const bestDistance = Math.abs(best.durationMs - expectedDurationMs);
+                    const candidateDistance = Math.abs(candidate.durationMs - expectedDurationMs);
+                    return candidateDistance < bestDistance ? candidate : best;
+                });
+
+                const relaxedToleranceMs = Math.max(getDurationToleranceMs() * 2, 45_000);
+                if (Math.abs(closest.durationMs - expectedDurationMs) <= relaxedToleranceMs) {
+                    return closest;
+                }
+            }
+        }
+
+        return allowFallbackAny ? candidates[0] : null;
     }
 
     async function requestManualLink(trackName, query) {
@@ -2464,8 +2563,15 @@ app.whenReady().then(() => {
         }
 
         mainWindow.webContents.send('update-status', `⚠️ No duration-matching YouTube result for: ${trackName}. Trying SoundCloud...`);
-        const soundCloudMatch = await searchCandidates('scsearch', query, expectedDurationMs);
+        const soundCloudMatch = await searchCandidates('scsearch', query, expectedDurationMs, 8, {
+            allowClosestMatch: true,
+            allowFallbackAny: true,
+        });
         if (soundCloudMatch) {
+            const matchedStrictly = isDurationMatch(soundCloudMatch.durationMs, expectedDurationMs);
+            if (!matchedStrictly) {
+                mainWindow.webContents.send('update-status', `ℹ️ Using best available SoundCloud result for: ${trackName} (strict duration match unavailable).`);
+            }
             linkCache[cacheKey] = soundCloudMatch.url;
             saveCache();
             return { link: soundCloudMatch.url, source: 'soundcloud' };
@@ -2516,11 +2622,16 @@ app.whenReady().then(() => {
     }
 
     async function downloadItem(item, index, total, onProgress) {
-        const { youtubeLink: link, trackName } = item;
+        const { youtubeLink: link, trackName, outputDir, queuePosition, queueTotal, queueLabel } = item;
         const sanitizedTrackName = sanitizeFilename(trackName);
+        const safeOutputDir = outputDir && outputDir.trim() ? outputDir : downloadsDir;
+        fs.mkdirSync(safeOutputDir, { recursive: true });
         const numberPrefix = (index + 1).toString().padStart(3, '0');
-        const outputTemplate = path.join(downloadsDir, `${numberPrefix} - ${sanitizedTrackName}.%(ext)s`);
+        const outputTemplate = path.join(safeOutputDir, `${numberPrefix} - ${sanitizedTrackName}.%(ext)s`);
         const audioFormat = config.fileExtension || 'm4a';
+        const queuePrefix = Number.isFinite(queuePosition) && Number.isFinite(queueTotal)
+            ? `[Queue ${queuePosition}/${queueTotal}${queueLabel ? `: ${queueLabel}` : ''}] `
+            : '';
         const args = [
             '--extract-audio', 
             '--audio-format', audioFormat, 
@@ -2580,17 +2691,17 @@ app.whenReady().then(() => {
             };
 
             const findFallbackDownloadedPath = () => {
-                const expectedWithConfiguredExt = path.join(downloadsDir, `${numberPrefix} - ${sanitizedTrackName}.${audioFormat}`);
+                const expectedWithConfiguredExt = path.join(safeOutputDir, `${numberPrefix} - ${sanitizedTrackName}.${audioFormat}`);
                 if (fs.existsSync(expectedWithConfiguredExt)) {
                     return expectedWithConfiguredExt;
                 }
 
                 try {
                     const expectedPrefix = `${numberPrefix} - ${sanitizedTrackName}.`;
-                    const matchedFile = fs.readdirSync(downloadsDir)
+                    const matchedFile = fs.readdirSync(safeOutputDir)
                         .find(fileName => fileName.startsWith(expectedPrefix));
                     if (matchedFile) {
-                        return path.join(downloadsDir, matchedFile);
+                        return path.join(safeOutputDir, matchedFile);
                     }
                 } catch {
                     return '';
@@ -2633,10 +2744,10 @@ app.whenReady().then(() => {
                 }
 
                 if (code === 0 && finalPath) {
-                    mainWindow.webContents.send('update-status', `✅ [${index + 1}/${total}] Finished: "${sanitizedTrackName}"`);
+                    mainWindow.webContents.send('update-status', `✅ ${queuePrefix}[${index + 1}/${total}] Finished: "${sanitizedTrackName}"`);
                     resolve(finalPath);
                 } else {
-                    const errorMsg = `❌ [${index + 1}/${total}] Failed: "${sanitizedTrackName}" (yt-dlp exit code ${code})`;
+                    const errorMsg = `❌ ${queuePrefix}[${index + 1}/${total}] Failed: "${sanitizedTrackName}" (yt-dlp exit code ${code})`;
                     mainWindow.webContents.send('update-status', errorMsg);
                     reject(new Error(errorMsg));
                 }
