@@ -211,15 +211,19 @@ function findYtdlpExecutables() {
         });
 
         const latestVersion = withVersion[0]?.versionDate ?? null;
-        ytdlpExecutables = latestVersion
+        const latestExecutables = latestVersion
             ? withVersion.filter(entry => entry.versionDate === latestVersion).map(entry => entry.filePath)
             : withVersion.slice(0, 1).map(entry => entry.filePath);
+
+        ytdlpExecutables = latestExecutables.length > 0
+            ? Array.from({ length: MAX_DOWNLOAD_THREADS }, (_, index) => latestExecutables[index % latestExecutables.length])
+            : [];
 
         if (ytdlpExecutables.length === 0) {
             console.error(`No 'yt-dlp*.exe' executables found in ${ytdlpDir}`);
         } else {
             const selected = ytdlpExecutables[0];
-            console.log(`Using ${ytdlpExecutables.length} yt-dlp instance(s), selected baseline: ${path.basename(selected)}`);
+            console.log(`Using ${ytdlpExecutables.length} yt-dlp worker slot(s) from ${latestExecutables.length} executable(s), selected baseline: ${path.basename(selected)}`);
         }
     } catch (error) {
         console.error('Failed to find yt-dlp executables:', error);
@@ -909,7 +913,7 @@ app.whenReady().then(() => {
         mainWindow.close();
     });
 
-    ipcMain.handle('get-ytdlp-count', () => (ytdlpExecutables.length > 0 ? MAX_DOWNLOAD_THREADS : 0));
+    ipcMain.handle('get-ytdlp-count', () => ytdlpExecutables.length);
 
     ipcMain.handle('get-settings', () => config);
 
