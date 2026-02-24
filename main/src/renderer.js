@@ -82,12 +82,6 @@ window.addEventListener('DOMContentLoaded', () => {
     const settingsTabBar = document.getElementById('settings-tab-bar');
     const settingsTabButtons = Array.from(document.querySelectorAll('.settings-tab-btn'));
     const settingsTabPanels = Array.from(document.querySelectorAll('.settings-tab-panel'));
-    const tabSpeedSlider = document.getElementById('tab-speed-slider');
-    const tabSpeedValue = document.getElementById('tab-speed-value');
-    const dropdownSpeedSlider = document.getElementById('dropdown-speed-slider');
-    const dropdownSpeedValue = document.getElementById('dropdown-speed-value');
-    const themeFadeSlider = document.getElementById('theme-fade-slider');
-    const themeFadeValue = document.getElementById('theme-fade-value');
     const autoCreatePlaylistInput = document.getElementById('autoCreatePlaylist');
     const hideRefreshButtonsInput = document.getElementById('hideRefreshButtons');
     const hidePlaylistCountsInput = document.getElementById('hidePlaylistCounts');
@@ -166,6 +160,7 @@ window.addEventListener('DOMContentLoaded', () => {
     // --- STATE & CONTEXT (Centralized) ---
     const state = {
         currentThemeName: 'dark',
+        currentSettingsTab: 'general',
         favoriteThemes: [],
         favoritePlaylists: [],
         playlists: [],
@@ -258,13 +253,15 @@ window.addEventListener('DOMContentLoaded', () => {
 
     function setSettingsTab(tabName) {
         if (!settingsTabButtons.length || !settingsTabPanels.length) return;
+        const normalizedTabName = tabName || 'general';
+        state.currentSettingsTab = normalizedTabName;
         settingsTabButtons.forEach(button => {
-            const isActive = button.dataset.settingsTab === tabName;
+            const isActive = button.dataset.settingsTab === normalizedTabName;
             button.classList.toggle('active', isActive);
         });
         settingsTabPanels.forEach(panel => {
             const panelTabName = panel.id.replace('settings-panel-', '');
-            panel.classList.toggle('hidden', panelTabName !== tabName);
+            panel.classList.toggle('hidden', panelTabName !== normalizedTabName);
         });
     }
 
@@ -510,12 +507,6 @@ window.addEventListener('DOMContentLoaded', () => {
             settingsTabBar,
             settingsTabButtons,
             settingsTabPanels,
-            tabSpeedSlider,
-            tabSpeedValue,
-            dropdownSpeedSlider,
-            dropdownSpeedValue,
-            themeFadeSlider,
-            themeFadeValue,
             autoCreatePlaylistInput,
             hideRefreshButtonsInput,
             hidePlaylistCountsInput,
@@ -1144,15 +1135,7 @@ window.addEventListener('DOMContentLoaded', () => {
             applyTheme(currentConfig.theme || 'dark');
             state.favoriteThemes = currentConfig.favoriteThemes || [];
             state.favoritePlaylists = currentConfig.favoritePlaylists || [];
-            const setSlider = (slider, valueEl, prop, value) => {
-                slider.value = value;
-                valueEl.textContent = `${value}s`;
-                root.style.setProperty(prop, `${value}s`);
-            };
-            setSlider(tabSpeedSlider, tabSpeedValue, '--tab-switch-speed', currentConfig.tabSwitchSpeed || 0.3);
             log('Initial settings loaded');
-            setSlider(dropdownSpeedSlider, dropdownSpeedValue, '--dropdown-speed', currentConfig.dropdownSpeed || 0.4);
-            setSlider(themeFadeSlider, themeFadeValue, '--theme-fade-speed', currentConfig.themeFadeSpeed || 0.3);
             fileExtensionInput.value = currentConfig.fileExtension || 'm4a';
             downloadThreadsInput.value = currentConfig.downloadThreads || 3;
             clientIdInput.value = currentConfig.spotify.clientId;
@@ -1183,7 +1166,7 @@ window.addEventListener('DOMContentLoaded', () => {
             const savedPlayerVolume = Number.parseFloat(currentConfig.playerVolume);
             volumeSlider.value = Number.isFinite(savedPlayerVolume) ? Math.min(Math.max(savedPlayerVolume, 0), 1) : 1;
         }
-        [fileExtensionInput, downloadThreadsInput, clientIdInput, clientSecretInput, tabSpeedSlider, dropdownSpeedSlider, themeFadeSlider, autoCreatePlaylistInput, hideRefreshButtonsInput, hidePlaylistCountsInput, hideTrackNumbersInput, normalizeVolumeInput, hideSearchBarsInput, hideMixButtonsInput, visualThemeSyncInput, spectrogramColorInput, enableSmartPlaylistsInput, libraryPerformanceModeInput, spotifySearchLimitInput, skipManualLinkPromptInput, durationToleranceSecondsInput, silenceTrimThresholdDbInput].forEach(input => input.addEventListener('change', saveSettings));
+        [fileExtensionInput, downloadThreadsInput, clientIdInput, clientSecretInput, autoCreatePlaylistInput, hideRefreshButtonsInput, hidePlaylistCountsInput, hideTrackNumbersInput, normalizeVolumeInput, hideSearchBarsInput, hideMixButtonsInput, visualThemeSyncInput, spectrogramColorInput, enableSmartPlaylistsInput, libraryPerformanceModeInput, spotifySearchLimitInput, skipManualLinkPromptInput, durationToleranceSecondsInput, silenceTrimThresholdDbInput].forEach(input => input.addEventListener('change', saveSettings));
         hideRefreshButtonsInput.addEventListener('change', () => body.classList.toggle('hide-refresh-buttons', hideRefreshButtonsInput.checked));
         hidePlaylistCountsInput.addEventListener('change', () => body.classList.toggle('hide-playlist-counts', hidePlaylistCountsInput.checked));
         hideTrackNumbersInput.addEventListener('change', () => body.classList.toggle('hide-track-numbers', hideTrackNumbersInput.checked));
@@ -1304,7 +1287,7 @@ window.addEventListener('DOMContentLoaded', () => {
     homeBtn.addEventListener('click', () => showView(homeView, homeBtn));
     settingsBtn.addEventListener('click', () => {
         showView(settingsView, settingsBtn);
-        setSettingsTab('general');
+        setSettingsTab(state.currentSettingsTab);
     });
     if (advancedSettingsBtn) {
         advancedSettingsBtn.addEventListener('click', () => showView(advancedSettingsView, settingsBtn));
@@ -1366,18 +1349,6 @@ window.addEventListener('DOMContentLoaded', () => {
         if (result.success) showNotification('success', 'Cache Cleared', result.message);
         else showNotification('error', 'Cache Error', result.error);
     });
-
-    // --- Animation speed slider logic ---
-    const setupSlider = (slider, valueEl, prop) => {
-        slider.addEventListener('input', () => {
-            const speed = slider.value;
-            valueEl.textContent = `${speed}s`;
-            root.style.setProperty(prop, `${speed}s`);
-        });
-    };
-    setupSlider(tabSpeedSlider, tabSpeedValue, '--tab-switch-speed');
-    setupSlider(dropdownSpeedSlider, dropdownSpeedValue, '--dropdown-speed');
-    setupSlider(themeFadeSlider, themeFadeValue, '--theme-fade-speed');
 
     // --- Console Output Logic ---
     function appendConsoleMessage(message) {
@@ -1498,14 +1469,6 @@ window.addEventListener('DOMContentLoaded', () => {
         volumeSlider.value = Number.isFinite(Number.parseFloat(defaultSettings.playerVolume))
             ? Number.parseFloat(defaultSettings.playerVolume)
             : 1;
-        const setSlider = (slider, valueEl, prop, value) => {
-            slider.value = value;
-            valueEl.textContent = `${value}s`;
-            root.style.setProperty(prop, `${value}s`);
-        };
-        setSlider(tabSpeedSlider, tabSpeedValue, '--tab-switch-speed', defaultSettings.tabSwitchSpeed || 0.3);
-        setSlider(dropdownSpeedSlider, dropdownSpeedValue, '--dropdown-speed', defaultSettings.dropdownSpeed || 0.4);
-        setSlider(themeFadeSlider, themeFadeValue, '--theme-fade-speed', defaultSettings.themeFadeSpeed || 0.3);
         populateThemeGrid();
         saveSettings();
         showNotification('success', 'Settings Reset', 'All settings have been restored to their defaults.');

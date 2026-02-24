@@ -154,6 +154,7 @@
                 <div class="settings-tab-panel" id="settings-panel-general">
                     <div class="settings-group">
                         <label for="clientId">Spotify Client ID</label>
+                        <p class="setting-note">Used to authenticate Spotify API requests from the app.</p>
                         <div class="input-container">
                             <input type="text" id="clientId" placeholder="Enter your Spotify Client ID">
                             <button class="clear-btn hidden">&times;</button>
@@ -161,6 +162,7 @@
                     </div>
                     <div class="settings-group">
                         <label for="clientSecret">Spotify Client Secret</label>
+                        <p class="setting-note">Private key paired with your Client ID for Spotify access.</p>
                         <div class="input-with-button input-container">
                             <input type="password" id="clientSecret" placeholder="Enter your Spotify Client Secret">
                             <button class="clear-btn hidden">&times;</button>
@@ -169,6 +171,7 @@
                     </div>
                     <div class="settings-group">
                         <label for="downloadsPath">Download Location</label>
+                        <p class="setting-note">Folder where new audio downloads are saved.</p>
                         <div class="input-with-button">
                             <input type="text" id="downloadsPath" placeholder="Downloads will be saved here" readonly>
                             <button id="change-path-btn">Change</button>
@@ -176,6 +179,7 @@
                     </div>
                     <div class="settings-group">
                         <label for="playlistsPath">Playlists Folder</label>
+                        <p class="setting-note">Root folder SoundLink scans for playlist directories.</p>
                         <div class="input-with-button">
                             <input type="text" id="playlistsPath" placeholder="Select a folder containing your playlists" readonly>
                             <button id="change-playlists-path-btn">Change</button>
@@ -183,10 +187,14 @@
                     </div>
                     <div class="settings-group">
                         <label for="spotify-search-limit">Spotify Search Result Limit</label>
+                        <p class="setting-note">Maximum results returned per Spotify search request.</p>
                         <input type="number" id="spotify-search-limit" placeholder="1-50" min="1" max="50">
                     </div>
                     <div class="settings-group toggle-switch-container">
-                        <label for="autoCreatePlaylist">Automatically Create Playlist</label>
+                        <div class="setting-label-block">
+                            <label for="autoCreatePlaylist">Automatically Create Playlist</label>
+                            <p class="setting-note">Creates a playlist from the most recent successful download batch.</p>
+                        </div>
                         <label class="toggle-switch">
                             <input type="checkbox" id="autoCreatePlaylist">
                             <span class="slider round"></span>
@@ -205,6 +213,7 @@
                     <div class="theme-settings-block">
                         <div class="settings-group spectrogram-color-group">
                             <label for="spectrogramColor">Spectrogram Color</label>
+                            <p class="setting-note">Overrides automatic spectrogram tint with your selected color.</p>
                             <div class="spectrogram-color-input-wrap">
                                 <input type="color" id="spectrogramColor" value="#3b82f6">
                             </div>
@@ -215,6 +224,7 @@
                 <div class="settings-tab-panel hidden" id="settings-panel-playback">
                     <div class="settings-group">
                         <label for="fileExtension">Audio File Extension</label>
+                        <p class="setting-note">Output format used when extracting audio from downloads.</p>
                         <select id="fileExtension">
                             <option value="m4a">m4a (best quality)</option>
                             <option value="mp3">mp3</option>
@@ -226,96 +236,118 @@
                     </div>
                     <div class="settings-group">
                         <label for="downloadThreads">Download Threads</label>
+                        <p class="setting-note">How many downloads can run in parallel.</p>
                         <input type="number" id="downloadThreads" placeholder="1-20" min="1">
                     </div>
                     <div class="settings-group toggle-switch-container">
-                        <label for="normalizeVolume">Normalize Volume (slower)</label>
+                        <div class="setting-label-block">
+                            <label for="normalizeVolume">Normalize Volume (slower)</label>
+                            <p class="setting-note">Applies loudness normalization after download for more consistent playback.</p>
+                        </div>
                         <label class="toggle-switch">
                             <input type="checkbox" id="normalizeVolume">
                             <span class="slider round"></span>
                         </label>
                     </div>
                     <div class="settings-group toggle-switch-container">
-                        <label for="visualThemeSync">Visual Theme Sync</label>
+                        <div class="setting-label-block">
+                            <label for="visualThemeSync">Visual Theme Sync</label>
+                            <p class="setting-note">Syncs player visuals to the active app theme.</p>
+                        </div>
                         <label class="toggle-switch">
                             <input type="checkbox" id="visualThemeSync">
                             <span class="slider round"></span>
                         </label>
                     </div>
                     <div class="settings-group sleep-timer-settings-group">
-                        <label>Sleep Timer</label>
+                        <div class="setting-label-block">
+                            <label>Sleep Timer</label>
+                            <p class="setting-note">Stops playback automatically after a selected duration.</p>
+                        </div>
                         <button id="sleep-timer-btn" type="button" class="secondary-btn settings-sleep-timer-btn" title="Sleep Timer">
                             <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
                             <span>Set Sleep Timer</span>
                         </button>
                         <span id="sleep-timer-display" class="hidden settings-sleep-timer-display"></span>
                     </div>
-                    <div class="settings-group">
-                        <label for="tab-speed-slider">Tab Switch Speed: <span id="tab-speed-value">0.3s</span></label>
-                        <input type="range" min="0.1" max="1" step="0.1" value="0.3" id="tab-speed-slider">
-                    </div>
-                    <div class="settings-group">
-                        <label for="dropdown-speed-slider">Dropdown Speed: <span id="dropdown-speed-value">0.4s</span></label>
-                        <input type="range" min="0.1" max="1" step="0.1" value="0.4" id="dropdown-speed-slider">
-                    </div>
-                    <div class="settings-group">
-                        <label for="theme-fade-slider">Theme Fade Speed: <span id="theme-fade-value">0.3s</span></label>
-                        <input type="range" min="0.1" max="1" step="0.1" value="0.3" id="theme-fade-slider">
-                    </div>
                 </div>
 
                 <div class="settings-tab-panel hidden" id="settings-panel-library">
                     <div class="settings-group toggle-switch-container">
-                        <label for="hideRefreshButtons">Hide Refresh Buttons</label>
+                        <div class="setting-label-block">
+                            <label for="hideRefreshButtons">Hide Refresh Buttons</label>
+                            <p class="setting-note">Removes playlist/track refresh buttons from library views.</p>
+                        </div>
                         <label class="toggle-switch">
                             <input type="checkbox" id="hideRefreshButtons">
                             <span class="slider round"></span>
                         </label>
                     </div>
                     <div class="settings-group toggle-switch-container">
-                        <label for="hidePlaylistCounts">Hide Playlist Counts</label>
+                        <div class="setting-label-block">
+                            <label for="hidePlaylistCounts">Hide Playlist Counts</label>
+                            <p class="setting-note">Hides track-count labels shown next to playlists.</p>
+                        </div>
                         <label class="toggle-switch">
                             <input type="checkbox" id="hidePlaylistCounts">
                             <span class="slider round"></span>
                         </label>
                     </div>
                     <div class="settings-group toggle-switch-container">
-                        <label for="hideTrackNumbers">Hide Track Numbers</label>
+                        <div class="setting-label-block">
+                            <label for="hideTrackNumbers">Hide Track Numbers</label>
+                            <p class="setting-note">Removes numeric prefixes in track lists.</p>
+                        </div>
                         <label class="toggle-switch">
                             <input type="checkbox" id="hideTrackNumbers">
                             <span class="slider round"></span>
                         </label>
                     </div>
                     <div class="settings-group toggle-switch-container">
-                        <label for="hideSearchBars">Hide Search Bars</label>
+                        <div class="setting-label-block">
+                            <label for="hideSearchBars">Hide Search Bars</label>
+                            <p class="setting-note">Hides playlist and track search inputs in library views.</p>
+                        </div>
                         <label class="toggle-switch">
                             <input type="checkbox" id="hideSearchBars">
                             <span class="slider round"></span>
                         </label>
                     </div>
                     <div class="settings-group toggle-switch-container">
-                        <label for="hideMixButtons">Hide Mix Buttons</label>
+                        <div class="setting-label-block">
+                            <label for="hideMixButtons">Hide Mix Buttons</label>
+                            <p class="setting-note">Hides mix-generation actions from playlist screens.</p>
+                        </div>
                         <label class="toggle-switch">
                             <input type="checkbox" id="hideMixButtons">
                             <span class="slider round"></span>
                         </label>
                     </div>
                     <div class="settings-group toggle-switch-container">
-                        <label for="enableSmartPlaylists">Enable Smart Playlists</label>
+                        <div class="setting-label-block">
+                            <label for="enableSmartPlaylists">Enable Smart Playlists</label>
+                            <p class="setting-note">Shows dynamic playlists like Recently Added and Most Played.</p>
+                        </div>
                         <label class="toggle-switch">
                             <input type="checkbox" id="enableSmartPlaylists">
                             <span class="slider round"></span>
                         </label>
                     </div>
                     <div class="settings-group toggle-switch-container">
-                        <label for="libraryPerformanceMode">Library Performance Mode</label>
+                        <div class="setting-label-block">
+                            <label for="libraryPerformanceMode">Library Performance Mode</label>
+                            <p class="setting-note">Uses metadata caching to speed up library loading.</p>
+                        </div>
                         <label class="toggle-switch">
                             <input type="checkbox" id="libraryPerformanceMode">
                             <span class="slider round"></span>
                         </label>
                     </div>
                     <div class="settings-group toggle-switch-container">
-                        <label for="skipManualLinkPrompt">Skip Manual Link Prompt</label>
+                        <div class="setting-label-block">
+                            <label for="skipManualLinkPrompt">Skip Manual Link Prompt</label>
+                            <p class="setting-note">Skips manual URL prompts when no link match is found.</p>
+                        </div>
                         <label class="toggle-switch">
                             <input type="checkbox" id="skipManualLinkPrompt">
                             <span class="slider round"></span>
@@ -323,21 +355,38 @@
                     </div>
                     <div class="settings-group">
                         <label for="durationToleranceSeconds">Duration Tolerance (seconds)</label>
+                        <p class="setting-note">Allowed duration difference when matching search results.</p>
                         <input type="number" id="durationToleranceSeconds" placeholder="0-120" min="0" max="120">
                     </div>
                     <div class="settings-group">
                         <label for="silenceTrimThresholdDb">Silence Trim Threshold (dB)</label>
+                        <p class="setting-note">Lower values trim less silence; higher values trim more aggressively.</p>
                         <input type="number" id="silenceTrimThresholdDb" placeholder="10-80" min="10" max="80">
                     </div>
                 </div>
 
                 <div class="settings-tab-panel hidden" id="settings-panel-maintenance">
                     <div class="settings-group advanced-actions-container">
-                        <button id="trim-library-silence-btn" class="secondary-btn">Trim Start/End Silence in Library</button>
-                        <button id="update-ytdlp-btn">Update yt-dlp</button>
-                        <button id="check-for-updates-btn">Check for App Updates</button>
-                        <button id="clear-cache-btn" class="secondary-btn">Clear Link Cache</button>
-                        <button id="reset-settings-btn">Reset to Default</button>
+                        <div class="maintenance-action">
+                            <button id="trim-library-silence-btn" class="secondary-btn">Trim Start/End Silence in Library</button>
+                            <p class="setting-note">Scans your library and trims leading/trailing silence.</p>
+                        </div>
+                        <div class="maintenance-action">
+                            <button id="update-ytdlp-btn">Update yt-dlp</button>
+                            <p class="setting-note">Checks for newer yt-dlp binaries and updates if available.</p>
+                        </div>
+                        <div class="maintenance-action">
+                            <button id="check-for-updates-btn">Check for App Updates</button>
+                            <p class="setting-note">Manually checks for a new SoundLink version.</p>
+                        </div>
+                        <div class="maintenance-action">
+                            <button id="clear-cache-btn" class="secondary-btn">Clear Link Cache</button>
+                            <p class="setting-note">Removes saved link lookup cache entries.</p>
+                        </div>
+                        <div class="maintenance-action">
+                            <button id="reset-settings-btn">Reset to Default</button>
+                            <p class="setting-note">Restores all app settings to default values.</p>
+                        </div>
                     </div>
                 </div>
             </div>

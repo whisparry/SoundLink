@@ -312,10 +312,26 @@
     margin-bottom: 25px;
 }
 
+.setting-label-block {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+}
+
+.setting-note {
+    margin: 0 0 10px;
+    font-size: 12px;
+    line-height: 1.4;
+    color: var(--text-secondary);
+    opacity: 0.9;
+}
+
 .toggle-switch-container {
     display: flex;
     justify-content: space-between;
-    align-items: center;
+    align-items: flex-start;
+    gap: 16px;
 }
 
 .toggle-switch {
@@ -421,6 +437,10 @@ input[type=number] {
 .sleep-timer-settings-group label {
     margin-bottom: 0;
     min-width: 100%;
+}
+
+.sleep-timer-settings-group .setting-note {
+    margin: 0;
 }
 
 .settings-sleep-timer-btn {
@@ -688,6 +708,16 @@ input[type=range]::-moz-range-thumb {
     grid-template-columns: 1fr 1fr;
     gap: 15px;
     margin-top: 40px;
+}
+
+.maintenance-action {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.maintenance-action .setting-note {
+    margin: 0;
 }
 
 .advanced-actions-container button {

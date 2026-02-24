@@ -290,9 +290,6 @@ function loadConfig() {
                 fileExtension: 'm4a',
                 downloadThreads: 3,
                 spotifySearchLimit: 10,
-                tabSwitchSpeed: 0.2,
-                dropdownSpeed: 0.4,
-                themeFadeSpeed: 0.3,
                 spotify: { clientId: '', clientSecret: '' }, 
                 downloadsPath: downloadsDir,
                 autoCreatePlaylist: false,
@@ -1028,9 +1025,6 @@ app.whenReady().then(() => {
             fileExtension: 'm4a',
             downloadThreads: 3,
             spotifySearchLimit: 10,
-            tabSwitchSpeed: 0.2,
-            dropdownSpeed: 0.4,
-            themeFadeSpeed: 0.3,
             spotify: { clientId: '', clientSecret: '' }, 
             autoCreatePlaylist: false,
             hideRefreshButtons: false,
@@ -1056,6 +1050,9 @@ app.whenReady().then(() => {
     ipcMain.handle('save-settings', (event, newSettings) => {
         try {
             config = { ...config, ...newSettings };
+            delete config.tabSwitchSpeed;
+            delete config.dropdownSpeed;
+            delete config.themeFadeSpeed;
             safeWriteFileSync(configPath, JSON.stringify(config, null, 4));
             downloadsDir = config.downloadsPath;
             if (config.spotify) {
