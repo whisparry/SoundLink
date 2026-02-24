@@ -9,8 +9,6 @@ window.addEventListener('DOMContentLoaded', () => {
     const homeBtn = document.getElementById('home-btn');
     const settingsBtn = document.getElementById('settings-btn');
     const advancedSettingsBtn = document.getElementById('advanced-settings-btn');
-    const openAdvancedSettingsBtn = document.getElementById('open-advanced-settings-btn');
-    const backToSettingsBtn = document.getElementById('back-to-settings-btn');
     const playerBtn = document.getElementById('player-btn');
     const playlistManagementBtn = document.getElementById('playlist-management-btn');
     const consoleBtn = document.getElementById('console-btn');
@@ -81,9 +79,9 @@ window.addEventListener('DOMContentLoaded', () => {
     const successRateStat = document.getElementById('success-rate-stat');
     const notificationsReceivedStat = document.getElementById('notifications-received-stat');
     const resetStatsBtn = document.getElementById('reset-stats-btn');
-    const configCategoryHeader = document.getElementById('config-category-header');
-    const themesCategoryHeader = document.getElementById('themes-category-header');
-    const animationsCategoryHeader = document.getElementById('animations-category-header');
+    const settingsTabBar = document.getElementById('settings-tab-bar');
+    const settingsTabButtons = Array.from(document.querySelectorAll('.settings-tab-btn'));
+    const settingsTabPanels = Array.from(document.querySelectorAll('.settings-tab-panel'));
     const tabSpeedSlider = document.getElementById('tab-speed-slider');
     const tabSpeedValue = document.getElementById('tab-speed-value');
     const dropdownSpeedSlider = document.getElementById('dropdown-speed-slider');
@@ -257,6 +255,18 @@ window.addEventListener('DOMContentLoaded', () => {
         logTab(tabName, 'loaded');
     }
 
+    function setSettingsTab(tabName) {
+        if (!settingsTabButtons.length || !settingsTabPanels.length) return;
+        settingsTabButtons.forEach(button => {
+            const isActive = button.dataset.settingsTab === tabName;
+            button.classList.toggle('active', isActive);
+        });
+        settingsTabPanels.forEach(panel => {
+            const panelTabName = panel.id.replace('settings-panel-', '');
+            panel.classList.toggle('hidden', panelTabName !== tabName);
+        });
+    }
+
     const hideContextMenu = () => {
         if (contextMenu) contextMenu.classList.add('hidden');
     };
@@ -426,8 +436,6 @@ window.addEventListener('DOMContentLoaded', () => {
             homeBtn,
             settingsBtn,
             advancedSettingsBtn,
-            openAdvancedSettingsBtn,
-            backToSettingsBtn,
             playerBtn,
             playlistManagementBtn,
             consoleBtn,
@@ -498,9 +506,9 @@ window.addEventListener('DOMContentLoaded', () => {
             successRateStat,
             notificationsReceivedStat,
             resetStatsBtn,
-            configCategoryHeader,
-            themesCategoryHeader,
-            animationsCategoryHeader,
+            settingsTabBar,
+            settingsTabButtons,
+            settingsTabPanels,
             tabSpeedSlider,
             tabSpeedValue,
             dropdownSpeedSlider,
@@ -1292,16 +1300,21 @@ window.addEventListener('DOMContentLoaded', () => {
 
     // --- Tab Switching Logic ---
     homeBtn.addEventListener('click', () => showView(homeView, homeBtn));
-    settingsBtn.addEventListener('click', () => showView(settingsView, settingsBtn));
+    settingsBtn.addEventListener('click', () => {
+        showView(settingsView, settingsBtn);
+        setSettingsTab('general');
+    });
     if (advancedSettingsBtn) {
         advancedSettingsBtn.addEventListener('click', () => showView(advancedSettingsView, settingsBtn));
     }
-    if (openAdvancedSettingsBtn) {
-        openAdvancedSettingsBtn.addEventListener('click', () => showView(advancedSettingsView, settingsBtn));
-    }
-    if (backToSettingsBtn) {
-        backToSettingsBtn.addEventListener('click', () => showView(settingsView, settingsBtn));
-    }
+    settingsTabButtons.forEach(button => {
+        button.addEventListener('click', () => {
+            const tabName = button.dataset.settingsTab;
+            if (!tabName) return;
+            setSettingsTab(tabName);
+            logTab('Settings', 'tab selected', { tab: tabName });
+        });
+    });
     playerBtn.addEventListener('click', () => {
         logTab('Player', 'open requested');
         showView(playerView, playerBtn);
@@ -1350,16 +1363,6 @@ window.addEventListener('DOMContentLoaded', () => {
         const result = await window.electronAPI.clearLinkCache();
         if (result.success) showNotification('success', 'Cache Cleared', result.message);
         else showNotification('error', 'Cache Error', result.error);
-    });
-
-    // --- Category Collapse Logic ---
-    [configCategoryHeader, themesCategoryHeader, animationsCategoryHeader].forEach(header => {
-        header.addEventListener('click', () => {
-            logTab('Settings', 'category toggled', { categoryId: header.id });
-            const content = header.nextElementSibling;
-            content.classList.toggle('collapsed');
-            header.classList.toggle('collapsed');
-        });
     });
 
     // --- Animation speed slider logic ---

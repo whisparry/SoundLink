@@ -143,213 +143,193 @@
             <!-- Settings View -->
             <div id="settings-view" class="view">
                 <h1>Settings</h1>
-                <div class="settings-nav-actions">
-                    <button id="open-advanced-settings-btn" class="secondary-btn">Open Advanced Settings</button>
+                <div class="settings-tab-bar" id="settings-tab-bar">
+                    <button class="settings-tab-btn active" data-settings-tab="general" type="button">General</button>
+                    <button class="settings-tab-btn" data-settings-tab="themes" type="button">Themes</button>
+                    <button class="settings-tab-btn" data-settings-tab="advanced" type="button">Advanced</button>
                 </div>
-                <div class="settings-category">
-                    <div class="category-header" id="themes-category-header">
-                        <h3>Themes</h3>
-                        <span class="category-arrow">▼</span>
-                    </div>
-                    <div class="category-content" id="themes-category-content">
-                        <div id="favorites-container" class="hidden">
-                            <h4 class="theme-section-header">Favorites</h4>
-                            <div class="theme-grid" id="favorite-theme-grid"></div>
+
+                <div class="settings-tab-panel" id="settings-panel-general">
+                    <div class="settings-group">
+                        <label for="clientId">Spotify Client ID</label>
+                        <div class="input-container">
+                            <input type="text" id="clientId" placeholder="Enter your Spotify Client ID">
+                            <button class="clear-btn hidden">&times;</button>
                         </div>
-                        <h4 class="theme-section-header">All Themes</h4>
-                        <div class="theme-grid" id="theme-grid"></div>
+                    </div>
+                    <div class="settings-group">
+                        <label for="clientSecret">Spotify Client Secret</label>
+                        <div class="input-with-button input-container">
+                            <input type="password" id="clientSecret" placeholder="Enter your Spotify Client Secret">
+                            <button class="clear-btn hidden">&times;</button>
+                            <button id="toggle-secret-btn">Show</button>
+                        </div>
+                    </div>
+                    <div class="settings-group">
+                        <label for="downloadsPath">Download Location</label>
+                        <div class="input-with-button">
+                            <input type="text" id="downloadsPath" placeholder="Downloads will be saved here" readonly>
+                            <button id="change-path-btn">Change</button>
+                        </div>
+                    </div>
+                    <div class="settings-group">
+                        <label for="playlistsPath">Playlists Folder</label>
+                        <div class="input-with-button">
+                            <input type="text" id="playlistsPath" placeholder="Select a folder containing your playlists" readonly>
+                            <button id="change-playlists-path-btn">Change</button>
+                        </div>
+                    </div>
+                    <div class="settings-group">
+                        <label for="spotify-search-limit">Spotify Search Result Limit</label>
+                        <input type="number" id="spotify-search-limit" placeholder="1-50" min="1" max="50">
+                    </div>
+                    <div class="settings-group toggle-switch-container">
+                        <label for="autoCreatePlaylist">Automatically Create Playlist</label>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="autoCreatePlaylist">
+                            <span class="slider round"></span>
+                        </label>
                     </div>
                 </div>
-                <div class="settings-category">
-                    <div class="category-header" id="config-category-header">
-                        <h3>Config</h3>
-                        <span class="category-arrow">▼</span>
+
+                <div class="settings-tab-panel hidden" id="settings-panel-themes">
+                    <div id="favorites-container" class="hidden">
+                        <h4 class="theme-section-header">Favorites</h4>
+                        <div class="theme-grid" id="favorite-theme-grid"></div>
                     </div>
-                    <div class="category-content" id="config-category-content">
-                        <div class="settings-group">
-                            <label for="clientId">Spotify Client ID</label>
-                            <div class="input-container">
-                                <input type="text" id="clientId" placeholder="Enter your Spotify Client ID">
-                                <button class="clear-btn hidden">&times;</button>
-                            </div>
-                        </div>
-                        <div class="settings-group">
-                            <label for="clientSecret">Spotify Client Secret</label>
-                            <div class="input-with-button input-container">
-                                <input type="password" id="clientSecret" placeholder="Enter your Spotify Client Secret">
-                                <button class="clear-btn hidden">&times;</button>
-                                <button id="toggle-secret-btn">Show</button>
-                            </div>
-                        </div>
-                        <div class="settings-group">
-                            <label for="downloadsPath">Download Location</label>
-                            <div class="input-with-button">
-                                <input type="text" id="downloadsPath" placeholder="Downloads will be saved here" readonly>
-                                <button id="change-path-btn">Change</button>
-                            </div>
-                        </div>
-                        <div class="settings-group">
-                            <label for="playlistsPath">Playlists Folder</label>
-                            <div class="input-with-button">
-                                <input type="text" id="playlistsPath" placeholder="Select a folder containing your playlists" readonly>
-                                <button id="change-playlists-path-btn">Change</button>
-                            </div>
-                        </div>
+                    <h4 class="theme-section-header">All Themes</h4>
+                    <div class="theme-grid" id="theme-grid"></div>
+                </div>
+
+                <div class="settings-tab-panel hidden" id="settings-panel-advanced">
+                    <div class="settings-group">
+                        <label for="fileExtension">Audio File Extension</label>
+                        <select id="fileExtension">
+                            <option value="m4a">m4a (best quality)</option>
+                            <option value="mp3">mp3</option>
+                            <option value="wav">wav</option>
+                            <option value="flac">flac</option>
+                            <option value="ogg">ogg</option>
+                            <option value="webm">webm</option>
+                        </select>
+                    </div>
+                    <div class="settings-group">
+                        <label for="downloadThreads">Download Threads</label>
+                        <input type="number" id="downloadThreads" placeholder="1-20" min="1">
+                    </div>
+                    <div class="settings-group toggle-switch-container">
+                        <label for="hideRefreshButtons">Hide Refresh Buttons</label>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="hideRefreshButtons">
+                            <span class="slider round"></span>
+                        </label>
+                    </div>
+                    <div class="settings-group toggle-switch-container">
+                        <label for="hidePlaylistCounts">Hide Playlist Counts</label>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="hidePlaylistCounts">
+                            <span class="slider round"></span>
+                        </label>
+                    </div>
+                    <div class="settings-group toggle-switch-container">
+                        <label for="hideTrackNumbers">Hide Track Numbers</label>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="hideTrackNumbers">
+                            <span class="slider round"></span>
+                        </label>
+                    </div>
+                    <div class="settings-group toggle-switch-container">
+                        <label for="hideSearchBars">Hide Search Bars</label>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="hideSearchBars">
+                            <span class="slider round"></span>
+                        </label>
+                    </div>
+                    <div class="settings-group toggle-switch-container">
+                        <label for="hideMixButtons">Hide Mix Buttons</label>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="hideMixButtons">
+                            <span class="slider round"></span>
+                        </label>
+                    </div>
+                    <div class="settings-group toggle-switch-container">
+                        <label for="normalizeVolume">Normalize Volume (slower)</label>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="normalizeVolume">
+                            <span class="slider round"></span>
+                        </label>
+                    </div>
+                    <div class="settings-group toggle-switch-container">
+                        <label for="visualThemeSync">Visual Theme Sync</label>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="visualThemeSync">
+                            <span class="slider round"></span>
+                        </label>
+                    </div>
+                    <div class="settings-group">
+                        <label for="spectrogramColor">Spectrogram Color</label>
+                        <input type="color" id="spectrogramColor" value="#3b82f6">
+                    </div>
+                    <div class="settings-group toggle-switch-container">
+                        <label for="enableSmartPlaylists">Enable Smart Playlists</label>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="enableSmartPlaylists">
+                            <span class="slider round"></span>
+                        </label>
+                    </div>
+                    <div class="settings-group toggle-switch-container">
+                        <label for="libraryPerformanceMode">Library Performance Mode</label>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="libraryPerformanceMode">
+                            <span class="slider round"></span>
+                        </label>
+                    </div>
+                    <div class="settings-group toggle-switch-container">
+                        <label for="skipManualLinkPrompt">Skip Manual Link Prompt</label>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="skipManualLinkPrompt">
+                            <span class="slider round"></span>
+                        </label>
+                    </div>
+                    <div class="settings-group">
+                        <label for="durationToleranceSeconds">Duration Tolerance (seconds)</label>
+                        <input type="number" id="durationToleranceSeconds" placeholder="0-120" min="0" max="120">
+                    </div>
+                    <div class="settings-group">
+                        <label for="silenceTrimThresholdDb">Silence Trim Threshold (dB)</label>
+                        <input type="number" id="silenceTrimThresholdDb" placeholder="10-80" min="10" max="80">
+                    </div>
+                    <div class="settings-group sleep-timer-settings-group">
+                        <label>Sleep Timer</label>
+                        <button id="sleep-timer-btn" type="button" class="secondary-btn settings-sleep-timer-btn" title="Sleep Timer">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+                            <span>Set Sleep Timer</span>
+                        </button>
+                        <span id="sleep-timer-display" class="hidden settings-sleep-timer-display"></span>
+                    </div>
+                    <div class="settings-group">
+                        <label for="tab-speed-slider">Tab Switch Speed: <span id="tab-speed-value">0.3s</span></label>
+                        <input type="range" min="0.1" max="1" step="0.1" value="0.3" id="tab-speed-slider">
+                    </div>
+                    <div class="settings-group">
+                        <label for="dropdown-speed-slider">Dropdown Speed: <span id="dropdown-speed-value">0.4s</span></label>
+                        <input type="range" min="0.1" max="1" step="0.1" value="0.4" id="dropdown-speed-slider">
+                    </div>
+                    <div class="settings-group">
+                        <label for="theme-fade-slider">Theme Fade Speed: <span id="theme-fade-value">0.3s</span></label>
+                        <input type="range" min="0.1" max="1" step="0.1" value="0.3" id="theme-fade-slider">
+                    </div>
+                    <div class="settings-group advanced-actions-container">
+                        <button id="trim-library-silence-btn" class="secondary-btn">Trim Start/End Silence in Library</button>
+                        <button id="update-ytdlp-btn">Update yt-dlp</button>
+                        <button id="check-for-updates-btn">Check for App Updates</button>
+                        <button id="clear-cache-btn" class="secondary-btn">Clear Link Cache</button>
+                        <button id="reset-settings-btn">Reset to Default</button>
                     </div>
                 </div>
             </div>
 
-            <!-- Advanced Settings View -->
-            <div id="advanced-settings-view" class="view">
-                <div class="settings-nav-actions">
-                    <button id="back-to-settings-btn" class="secondary-btn">Back to Settings</button>
-                </div>
-                <h1>Advanced Settings</h1>
-                <div class="settings-group">
-                    <label for="fileExtension">Audio File Extension</label>
-                    <select id="fileExtension">
-                        <option value="m4a">m4a (best quality)</option>
-                        <option value="mp3">mp3</option>
-                        <option value="wav">wav</option>
-                        <option value="flac">flac</option>
-                        <option value="ogg">ogg</option>
-                        <option value="webm">webm</option>
-                    </select>
-                </div>
-                <div class="settings-group">
-                    <label for="downloadThreads">Download Threads</label>
-                    <input type="number" id="downloadThreads" placeholder="1-20" min="1">
-                </div>
-                <div class="settings-group">
-                    <label for="spotify-search-limit">Spotify Search Result Limit</label>
-                    <input type="number" id="spotify-search-limit" placeholder="1-50" min="1" max="50">
-                </div>
-                <div class="settings-group toggle-switch-container">
-                    <label for="autoCreatePlaylist">Automatically Create Playlist</label>
-                    <label class="toggle-switch">
-                        <input type="checkbox" id="autoCreatePlaylist">
-                        <span class="slider round"></span>
-                    </label>
-                </div>
-                <div class="settings-group toggle-switch-container">
-                    <label for="hideRefreshButtons">Hide Refresh Buttons</label>
-                    <label class="toggle-switch">
-                        <input type="checkbox" id="hideRefreshButtons">
-                        <span class="slider round"></span>
-                    </label>
-                </div>
-                <div class="settings-group toggle-switch-container">
-                    <label for="hidePlaylistCounts">Hide Playlist Counts</label>
-                    <label class="toggle-switch">
-                        <input type="checkbox" id="hidePlaylistCounts">
-                        <span class="slider round"></span>
-                    </label>
-                </div>
-                <div class="settings-group toggle-switch-container">
-                    <label for="hideTrackNumbers">Hide Track Numbers</label>
-                    <label class="toggle-switch">
-                        <input type="checkbox" id="hideTrackNumbers">
-                        <span class="slider round"></span>
-                    </label>
-                </div>
-                <div class="settings-group toggle-switch-container">
-                    <label for="hideSearchBars">Hide Search Bars</label>
-                    <label class="toggle-switch">
-                        <input type="checkbox" id="hideSearchBars">
-                        <span class="slider round"></span>
-                    </label>
-                </div>
-                <div class="settings-group toggle-switch-container">
-                    <label for="hideMixButtons">Hide Mix Buttons</label>
-                    <label class="toggle-switch">
-                        <input type="checkbox" id="hideMixButtons">
-                        <span class="slider round"></span>
-                    </label>
-                </div>
-                <div class="settings-group toggle-switch-container">
-                    <label for="normalizeVolume">Normalize Volume (slower)</label>
-                    <label class="toggle-switch">
-                        <input type="checkbox" id="normalizeVolume">
-                        <span class="slider round"></span>
-                    </label>
-                </div>
-                <div class="settings-group toggle-switch-container">
-                    <label for="visualThemeSync">Visual Theme Sync</label>
-                    <label class="toggle-switch">
-                        <input type="checkbox" id="visualThemeSync">
-                        <span class="slider round"></span>
-                    </label>
-                </div>
-                <div class="settings-group">
-                    <label for="spectrogramColor">Spectrogram Color</label>
-                    <input type="color" id="spectrogramColor" value="#3b82f6">
-                </div>
-                <div class="settings-group toggle-switch-container">
-                    <label for="enableSmartPlaylists">Enable Smart Playlists</label>
-                    <label class="toggle-switch">
-                        <input type="checkbox" id="enableSmartPlaylists">
-                        <span class="slider round"></span>
-                    </label>
-                </div>
-                <div class="settings-group toggle-switch-container">
-                    <label for="libraryPerformanceMode">Library Performance Mode</label>
-                    <label class="toggle-switch">
-                        <input type="checkbox" id="libraryPerformanceMode">
-                        <span class="slider round"></span>
-                    </label>
-                </div>
-                <div class="settings-group toggle-switch-container">
-                    <label for="skipManualLinkPrompt">Skip Manual Link Prompt</label>
-                    <label class="toggle-switch">
-                        <input type="checkbox" id="skipManualLinkPrompt">
-                        <span class="slider round"></span>
-                    </label>
-                </div>
-                <div class="settings-group">
-                    <label for="durationToleranceSeconds">Duration Tolerance (seconds)</label>
-                    <input type="number" id="durationToleranceSeconds" placeholder="0-120" min="0" max="120">
-                </div>
-                <div class="settings-group">
-                    <label for="silenceTrimThresholdDb">Silence Trim Threshold (dB)</label>
-                    <input type="number" id="silenceTrimThresholdDb" placeholder="10-80" min="10" max="80">
-                </div>
-                <div class="settings-group sleep-timer-settings-group">
-                    <label>Sleep Timer</label>
-                    <button id="sleep-timer-btn" type="button" class="secondary-btn settings-sleep-timer-btn" title="Sleep Timer">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
-                        <span>Set Sleep Timer</span>
-                    </button>
-                    <span id="sleep-timer-display" class="hidden settings-sleep-timer-display"></span>
-                </div>
-                 
-                <div class="settings-category">
-                    <div class="category-header" id="animations-category-header">
-                        <h3>Animations</h3>
-                        <span class="category-arrow">▼</span>
-                    </div>
-                    <div class="category-content" id="animations-category-content">
-                        <div class="settings-group">
-                            <label for="tab-speed-slider">Tab Switch Speed: <span id="tab-speed-value">0.3s</span></label>
-                            <input type="range" min="0.1" max="1" step="0.1" value="0.3" id="tab-speed-slider">
-                        </div>
-                        <div class="settings-group">
-                            <label for="dropdown-speed-slider">Dropdown Speed: <span id="dropdown-speed-value">0.4s</span></label>
-                            <input type="range" min="0.1" max="1" step="0.1" value="0.4" id="dropdown-speed-slider">
-                        </div>
-                        <div class="settings-group">
-                            <label for="theme-fade-slider">Theme Fade Speed: <span id="theme-fade-value">0.3s</span></label>
-                            <input type="range" min="0.1" max="1" step="0.1" value="0.3" id="theme-fade-slider">
-                        </div>
-                    </div>
-                </div>
-                <div class="settings-group advanced-actions-container">
-                    <button id="trim-library-silence-btn" class="secondary-btn">Trim Start/End Silence in Library</button>
-                    <button id="update-ytdlp-btn">Update yt-dlp</button>
-                    <button id="check-for-updates-btn">Check for App Updates</button>
-                    <button id="clear-cache-btn" class="secondary-btn">Clear Link Cache</button>
-                    <button id="reset-settings-btn">Reset to Default</button>
-                </div>
-            </div>
+            <div id="advanced-settings-view" class="view hidden"></div>
 
             <!-- Player View -->
             <div id="player-view" class="view">

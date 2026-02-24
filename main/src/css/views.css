@@ -24,6 +24,38 @@
     padding: 8px 12px;
 }
 
+.settings-tab-bar {
+    display: flex;
+    gap: 10px;
+    margin: 10px 0 20px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.settings-tab-btn {
+    margin: 0;
+    padding: 8px 14px;
+    font-size: 13px;
+    background-color: var(--bg-secondary);
+    color: var(--text-secondary);
+    border: 1px solid var(--border-color);
+}
+
+.settings-tab-btn:hover {
+    color: var(--text-primary);
+    border-color: var(--accent-primary);
+}
+
+.settings-tab-btn.active {
+    background-color: var(--accent-primary);
+    color: var(--accent-text-color);
+    border-color: var(--accent-primary);
+}
+
+.settings-tab-panel {
+    display: block;
+}
+
 /* --- Home View --- */
 .input-fields-container {
     display: flex;
