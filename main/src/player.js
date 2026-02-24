@@ -721,6 +721,58 @@ function closeMixDetailsModal() {
     mixDetailsModal.classList.add('hidden');
 }
 
+function getDefaultMixPlaylistName() {
+    const date = new Date();
+    const year = date.getFullYear();
+    const month = `${date.getMonth() + 1}`.padStart(2, '0');
+    const day = `${date.getDate()}`.padStart(2, '0');
+    return `Mix ${year}-${month}-${day}`;
+}
+
+async function saveCurrentMixAsPlaylist() {
+    if (playerState.activePlaylistIds.length < 2) {
+        ctx.helpers.showNotification('info', 'Mix Required', 'Add at least two playlists to a mix before saving.');
+        return;
+    }
+
+    const orderedTrackPaths = currentTracklist
+        .map(track => track?.path)
+        .filter(trackPath => typeof trackPath === 'string' && trackPath.length > 0);
+
+    if (orderedTrackPaths.length === 0) {
+        ctx.helpers.showNotification('info', 'No Tracks', 'The current mix has no tracks to save.');
+        return;
+    }
+
+    const requestedName = await ctx.helpers.showPromptDialog(
+        'Save Mix as Playlist',
+        'Enter a playlist name:',
+        getDefaultMixPlaylistName(),
+        { confirmText: 'Save', cancelText: 'Cancel' }
+    );
+
+    const playlistName = requestedName?.trim();
+    if (!playlistName) return;
+
+    const result = await window.electronAPI.createPlaylistFromTracks({
+        playlistName,
+        trackPaths: orderedTrackPaths,
+    });
+
+    if (!result?.success) {
+        ctx.helpers.showNotification('error', 'Save Failed', result?.error || 'Could not save the current mix.');
+        return;
+    }
+
+    ctx.helpers.showNotification(
+        'success',
+        'Mix Saved',
+        `Saved ${result.savedTrackCount} track${result.savedTrackCount !== 1 ? 's' : ''} to "${result.playlist?.name || playlistName}".`
+    );
+
+    await renderPlaylists();
+}
+
 async function openMixDetailsModal() {
     if (playerState.activePlaylistIds.length < 2) return;
 
@@ -759,42 +811,7 @@ async function openMixDetailsModal() {
             </div>
             <div class="mix-playlist-card-meta">${summary.trackCount} track${summary.trackCount !== 1 ? 's' : ''} • ${formatDurationForSummary(summary.durationSeconds)}</div>
             <div class="mix-playlist-card-tags" title="${escapeHtml(tags)}">${escapeHtml(tags)}</div>
-            <div class="mix-playlist-card-actions"></div>
         `;
-
-        const actions = card.querySelector('.mix-playlist-card-actions');
-        const addActionButton = (label, variant, handler) => {
-            const button = document.createElement('button');
-            button.type = 'button';
-            button.className = `mix-card-action-btn${variant ? ` ${variant}` : ''}`;
-            button.textContent = label;
-            button.addEventListener('click', async (event) => {
-                event.stopPropagation();
-                await handler();
-            });
-            actions.appendChild(button);
-        };
-
-        addActionButton('Remove from Mix', 'secondary-btn', async () => {
-            await togglePlaylistMix(playlist.path);
-            if (playerState.activePlaylistIds.length < 2) closeMixDetailsModal();
-            else await openMixDetailsModal();
-        });
-
-        if (!playlist.isSmart) {
-            addActionButton('Rename', 'secondary-btn', async () => {
-                await renamePlaylistFromContext(playlist);
-                await openMixDetailsModal();
-            });
-            addActionButton('Delete', 'danger-btn', async () => {
-                await deletePlaylistFromContext(playlist);
-                if (playerState.activePlaylistIds.length < 2) closeMixDetailsModal();
-                else await openMixDetailsModal();
-            });
-            addActionButton('Show in Folder', 'secondary-btn', async () => {
-                window.electronAPI.showInExplorer(playlist.path);
-            });
-        }
 
         card.addEventListener('contextmenu', (event) => {
             event.preventDefault();
@@ -1716,7 +1733,8 @@ export function initializePlayer(context) {
         playerTracksHeader,
         playerTracksStats,
         mixDetailsModal,
-        mixDetailsCloseBtn
+        mixDetailsCloseBtn,
+        mixDetailsSaveBtn,
     } = ctx.elements;
 
     if (ctx.state.activeQueuePaths instanceof Set) {
@@ -1808,6 +1826,12 @@ export function initializePlayer(context) {
     if (mixDetailsCloseBtn) {
         mixDetailsCloseBtn.addEventListener('click', () => {
             closeMixDetailsModal();
+        });
+    }
+
+    if (mixDetailsSaveBtn) {
+        mixDetailsSaveBtn.addEventListener('click', async () => {
+            await saveCurrentMixAsPlaylist();
         });
     }
 

@@ -1,6 +1,6 @@
 {
   "name": "soundlink",
-  "version": "2.14.0",
+  "version": "2.18.0",
   "description": "SoundLink is a smart application designed for downloading and managing music from Spotify. It allows users to easily download their favorite tracks, albums, and playlists in high quality, while also providing features for organizing and managing their music library. With SoundLink, users can enjoy their Spotify music offline and have a seamless experience in managing their music collection.",
   "main": "main/main.js",
   "scripts": {

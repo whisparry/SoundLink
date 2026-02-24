@@ -96,6 +96,7 @@ let trayPlaybackState = {
 
 const SMART_PLAYLIST_RECENTLY_ADDED = '__smart__/recently-added';
 const SMART_PLAYLIST_MOST_PLAYED = '__smart__/most-played';
+const MAX_DOWNLOAD_THREADS = 10;
 
 const DEFAULT_DOWNLOAD_TIMING_STATS = {
     trackSamples: 0,
@@ -908,7 +909,7 @@ app.whenReady().then(() => {
         mainWindow.close();
     });
 
-    ipcMain.handle('get-ytdlp-count', () => ytdlpExecutables.length);
+    ipcMain.handle('get-ytdlp-count', () => (ytdlpExecutables.length > 0 ? MAX_DOWNLOAD_THREADS : 0));
 
     ipcMain.handle('get-settings', () => config);
 
@@ -1505,6 +1506,81 @@ app.whenReady().then(() => {
         }
     });
 
+    ipcMain.handle('create-playlist-from-tracks', async (_event, { playlistName, trackPaths }) => {
+        try {
+            const playlistsPath = config.playlistsFolderPath;
+            if (!playlistsPath || !fs.existsSync(playlistsPath)) {
+                return { success: false, error: 'Playlists folder is not set or does not exist.' };
+            }
+
+            const requestedName = sanitizeFilename(String(playlistName || '').trim());
+            if (!requestedName) {
+                return { success: false, error: 'Please enter a valid playlist name.' };
+            }
+
+            const normalizedTrackPaths = Array.isArray(trackPaths)
+                ? trackPaths.filter(p => typeof p === 'string' && p.trim().length > 0)
+                : [];
+
+            if (normalizedTrackPaths.length === 0) {
+                return { success: false, error: 'No tracks were provided to save.' };
+            }
+
+            let finalName = requestedName;
+            let finalPath = path.join(playlistsPath, finalName);
+            let nameCounter = 2;
+            while (fs.existsSync(finalPath)) {
+                finalName = `${requestedName} (${nameCounter})`;
+                finalPath = path.join(playlistsPath, finalName);
+                nameCounter += 1;
+            }
+
+            await fs.promises.mkdir(finalPath, { recursive: true });
+
+            let savedTrackCount = 0;
+            for (const sourcePath of normalizedTrackPaths) {
+                if (!fs.existsSync(sourcePath)) continue;
+
+                const sourceStat = await fs.promises.stat(sourcePath);
+                if (!sourceStat.isFile()) continue;
+
+                const parsedName = path.parse(path.basename(sourcePath));
+                const baseName = sanitizeFilename(parsedName.name) || 'Track';
+                const extension = parsedName.ext || '';
+
+                let destinationPath = path.join(finalPath, `${baseName}${extension}`);
+                let duplicateCounter = 2;
+                while (fs.existsSync(destinationPath)) {
+                    destinationPath = path.join(finalPath, `${baseName} (${duplicateCounter})${extension}`);
+                    duplicateCounter += 1;
+                }
+
+                await fs.promises.copyFile(sourcePath, destinationPath);
+                savedTrackCount += 1;
+            }
+
+            if (savedTrackCount === 0) {
+                await fs.promises.rm(finalPath, { recursive: true, force: true });
+                return { success: false, error: 'No valid source tracks were found.' };
+            }
+
+            stats.playlistsCreated = (stats.playlistsCreated || 0) + 1;
+            saveStats();
+
+            return {
+                success: true,
+                savedTrackCount,
+                playlist: {
+                    name: finalName,
+                    path: finalPath,
+                },
+            };
+        } catch (error) {
+            console.error('Failed to create playlist from tracks:', error);
+            return { success: false, error: error.message };
+        }
+    });
+
     ipcMain.handle('delete-playlist', async (event, playlistPath) => {
         try {
             if (!playlistPath || !fs.existsSync(playlistPath)) {
@@ -1773,7 +1849,7 @@ app.whenReady().then(() => {
             await refreshSpotifyToken();
             const configuredThreads = Number.parseInt(config.downloadThreads, 10);
             const requestedThreads = Number.isFinite(configuredThreads) && configuredThreads > 0 ? configuredThreads : 3;
-            const concurrency = Math.max(1, Math.min(requestedThreads, ytdlpExecutables.length));
+            const concurrency = Math.max(1, Math.min(requestedThreads, MAX_DOWNLOAD_THREADS));
             const itemsToProcess = [];
             let trackIndex = 0;
             let spotifyLinkCount = 0;

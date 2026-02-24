@@ -156,6 +156,7 @@ window.addEventListener('DOMContentLoaded', () => {
     const mixDetailsTitle = document.getElementById('mix-details-title');
     const mixDetailsSummary = document.getElementById('mix-details-summary');
     const mixDetailsContent = document.getElementById('mix-details-content');
+    const mixDetailsSaveBtn = document.getElementById('mix-details-save-btn');
 
     const statsDetailModal = document.getElementById('stats-detail-modal');
     const statsDetailTitle = document.getElementById('stats-detail-title');
@@ -568,6 +569,7 @@ window.addEventListener('DOMContentLoaded', () => {
             mixDetailsTitle,
             mixDetailsSummary,
             mixDetailsContent,
+            mixDetailsSaveBtn,
         },
         state: state,
         helpers: { showLoader, hideLoader, saveSettings, showView, showContextMenu, hideContextMenu, showInfoDialog },
@@ -1126,10 +1128,10 @@ window.addEventListener('DOMContentLoaded', () => {
     const loadInitialSettings = async () => {
         log('Loading initial settings...');
         const currentConfig = await window.electronAPI.getSettings();
-        const ytdlpCount = await window.electronAPI.getYtdlpCount();
-        if (ytdlpCount > 0) {
-            downloadThreadsInput.max = ytdlpCount;
-            downloadThreadsInput.placeholder = `1-${ytdlpCount}`;
+        const downloadThreadLimit = await window.electronAPI.getYtdlpCount();
+        if (downloadThreadLimit > 0) {
+            downloadThreadsInput.max = downloadThreadLimit;
+            downloadThreadsInput.placeholder = `1-${downloadThreadLimit}`;
         } else {
             downloadThreadsInput.max = 1;
             downloadThreadsInput.placeholder = 'No yt-dlp found';

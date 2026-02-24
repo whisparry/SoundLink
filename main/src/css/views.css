@@ -26,6 +26,7 @@
 
 .settings-tab-bar {
     display: flex;
+    flex-wrap: wrap;
     gap: 10px;
     margin: 10px 0 20px;
     padding-bottom: 10px;
@@ -630,6 +631,56 @@ input[type=range]::-moz-range-thumb {
     color: var(--accent-text-color);
     border-color: var(--accent-primary);
     font-weight: bold;
+}
+
+.theme-settings-block {
+    margin: 0 10px;
+    padding: 12px;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    background-color: var(--bg-secondary);
+}
+
+.spectrogram-color-group {
+    margin: 0;
+}
+
+.spectrogram-color-group label {
+    margin-bottom: 10px;
+}
+
+.spectrogram-color-input-wrap {
+    display: inline-flex;
+    align-items: center;
+    padding: 4px;
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+    background-color: var(--bg-tertiary);
+}
+
+#spectrogramColor {
+    width: 46px;
+    height: 28px;
+    border: none;
+    border-radius: 7px;
+    background: transparent;
+    cursor: pointer;
+    padding: 0;
+}
+
+#spectrogramColor::-webkit-color-swatch-wrapper {
+    padding: 0;
+    border-radius: 7px;
+}
+
+#spectrogramColor::-webkit-color-swatch {
+    border: 1px solid var(--border-color);
+    border-radius: 7px;
+}
+
+#spectrogramColor::-moz-color-swatch {
+    border: 1px solid var(--border-color);
+    border-radius: 7px;
 }
 
 .advanced-actions-container {
@@ -1575,12 +1626,22 @@ body.audio-visual-sync-enabled.audio-visual-sync-active #audio-spectrogram-overl
     line-height: 1.4;
 }
 
+.mix-details-toolbar {
+    display: flex;
+    justify-content: flex-end;
+    margin: 0 6px 10px 0;
+}
+
+#mix-details-save-btn {
+    margin: 0;
+}
+
 .mix-details-content {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
     gap: 14px;
     overflow-y: auto;
-    padding-right: 6px;
+    padding: 4px 6px 8px 0;
 }
 
 .mix-playlist-card {
@@ -1589,6 +1650,7 @@ body.audio-visual-sync-enabled.audio-visual-sync-active #audio-spectrogram-overl
     background: var(--bg-tertiary);
     padding: 14px;
     transition: transform 0.18s ease, border-color 0.18s ease, background-color 0.18s ease;
+    will-change: transform;
 }
 
 .mix-playlist-card:hover {
@@ -1632,39 +1694,4 @@ body.audio-visual-sync-enabled.audio-visual-sync-active #audio-spectrogram-overl
     font-size: 12px;
     line-height: 1.4;
     color: var(--text-primary);
-}
-
-.mix-playlist-card-actions {
-    margin-top: 12px;
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-}
-
-.mix-card-action-btn {
-    margin: 0;
-    padding: 6px 10px;
-    font-size: 12px;
-    border-radius: 8px;
-}
-
-.mix-card-action-btn.secondary-btn {
-    background-color: var(--bg-secondary);
-    color: var(--text-secondary);
-    border: 1px solid var(--border-color);
-}
-
-.mix-card-action-btn.secondary-btn:hover {
-    background-color: var(--accent-hover);
-    color: var(--accent-text-color);
-    border-color: var(--accent-hover);
-}
-
-.mix-card-action-btn.danger-btn {
-    background-color: var(--danger-primary);
-    color: var(--accent-text-color);
-}
-
-.mix-card-action-btn.danger-btn:hover {
-    background-color: var(--danger-hover);
 }

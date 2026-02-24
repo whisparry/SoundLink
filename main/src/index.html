@@ -146,7 +146,9 @@
                 <div class="settings-tab-bar" id="settings-tab-bar">
                     <button class="settings-tab-btn active" data-settings-tab="general" type="button">General</button>
                     <button class="settings-tab-btn" data-settings-tab="themes" type="button">Themes</button>
-                    <button class="settings-tab-btn" data-settings-tab="advanced" type="button">Advanced</button>
+                    <button class="settings-tab-btn" data-settings-tab="playback" type="button">Playback</button>
+                    <button class="settings-tab-btn" data-settings-tab="library" type="button">Library</button>
+                    <button class="settings-tab-btn" data-settings-tab="maintenance" type="button">Maintenance</button>
                 </div>
 
                 <div class="settings-tab-panel" id="settings-panel-general">
@@ -199,9 +201,18 @@
                     </div>
                     <h4 class="theme-section-header">All Themes</h4>
                     <div class="theme-grid" id="theme-grid"></div>
+                    <h4 class="theme-section-header">Spectrogram</h4>
+                    <div class="theme-settings-block">
+                        <div class="settings-group spectrogram-color-group">
+                            <label for="spectrogramColor">Spectrogram Color</label>
+                            <div class="spectrogram-color-input-wrap">
+                                <input type="color" id="spectrogramColor" value="#3b82f6">
+                            </div>
+                        </div>
+                    </div>
                 </div>
 
-                <div class="settings-tab-panel hidden" id="settings-panel-advanced">
+                <div class="settings-tab-panel hidden" id="settings-panel-playback">
                     <div class="settings-group">
                         <label for="fileExtension">Audio File Extension</label>
                         <select id="fileExtension">
@@ -217,6 +228,43 @@
                         <label for="downloadThreads">Download Threads</label>
                         <input type="number" id="downloadThreads" placeholder="1-20" min="1">
                     </div>
+                    <div class="settings-group toggle-switch-container">
+                        <label for="normalizeVolume">Normalize Volume (slower)</label>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="normalizeVolume">
+                            <span class="slider round"></span>
+                        </label>
+                    </div>
+                    <div class="settings-group toggle-switch-container">
+                        <label for="visualThemeSync">Visual Theme Sync</label>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="visualThemeSync">
+                            <span class="slider round"></span>
+                        </label>
+                    </div>
+                    <div class="settings-group sleep-timer-settings-group">
+                        <label>Sleep Timer</label>
+                        <button id="sleep-timer-btn" type="button" class="secondary-btn settings-sleep-timer-btn" title="Sleep Timer">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+                            <span>Set Sleep Timer</span>
+                        </button>
+                        <span id="sleep-timer-display" class="hidden settings-sleep-timer-display"></span>
+                    </div>
+                    <div class="settings-group">
+                        <label for="tab-speed-slider">Tab Switch Speed: <span id="tab-speed-value">0.3s</span></label>
+                        <input type="range" min="0.1" max="1" step="0.1" value="0.3" id="tab-speed-slider">
+                    </div>
+                    <div class="settings-group">
+                        <label for="dropdown-speed-slider">Dropdown Speed: <span id="dropdown-speed-value">0.4s</span></label>
+                        <input type="range" min="0.1" max="1" step="0.1" value="0.4" id="dropdown-speed-slider">
+                    </div>
+                    <div class="settings-group">
+                        <label for="theme-fade-slider">Theme Fade Speed: <span id="theme-fade-value">0.3s</span></label>
+                        <input type="range" min="0.1" max="1" step="0.1" value="0.3" id="theme-fade-slider">
+                    </div>
+                </div>
+
+                <div class="settings-tab-panel hidden" id="settings-panel-library">
                     <div class="settings-group toggle-switch-container">
                         <label for="hideRefreshButtons">Hide Refresh Buttons</label>
                         <label class="toggle-switch">
@@ -253,24 +301,6 @@
                         </label>
                     </div>
                     <div class="settings-group toggle-switch-container">
-                        <label for="normalizeVolume">Normalize Volume (slower)</label>
-                        <label class="toggle-switch">
-                            <input type="checkbox" id="normalizeVolume">
-                            <span class="slider round"></span>
-                        </label>
-                    </div>
-                    <div class="settings-group toggle-switch-container">
-                        <label for="visualThemeSync">Visual Theme Sync</label>
-                        <label class="toggle-switch">
-                            <input type="checkbox" id="visualThemeSync">
-                            <span class="slider round"></span>
-                        </label>
-                    </div>
-                    <div class="settings-group">
-                        <label for="spectrogramColor">Spectrogram Color</label>
-                        <input type="color" id="spectrogramColor" value="#3b82f6">
-                    </div>
-                    <div class="settings-group toggle-switch-container">
                         <label for="enableSmartPlaylists">Enable Smart Playlists</label>
                         <label class="toggle-switch">
                             <input type="checkbox" id="enableSmartPlaylists">
@@ -299,26 +329,9 @@
                         <label for="silenceTrimThresholdDb">Silence Trim Threshold (dB)</label>
                         <input type="number" id="silenceTrimThresholdDb" placeholder="10-80" min="10" max="80">
                     </div>
-                    <div class="settings-group sleep-timer-settings-group">
-                        <label>Sleep Timer</label>
-                        <button id="sleep-timer-btn" type="button" class="secondary-btn settings-sleep-timer-btn" title="Sleep Timer">
-                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
-                            <span>Set Sleep Timer</span>
-                        </button>
-                        <span id="sleep-timer-display" class="hidden settings-sleep-timer-display"></span>
-                    </div>
-                    <div class="settings-group">
-                        <label for="tab-speed-slider">Tab Switch Speed: <span id="tab-speed-value">0.3s</span></label>
-                        <input type="range" min="0.1" max="1" step="0.1" value="0.3" id="tab-speed-slider">
-                    </div>
-                    <div class="settings-group">
-                        <label for="dropdown-speed-slider">Dropdown Speed: <span id="dropdown-speed-value">0.4s</span></label>
-                        <input type="range" min="0.1" max="1" step="0.1" value="0.4" id="dropdown-speed-slider">
-                    </div>
-                    <div class="settings-group">
-                        <label for="theme-fade-slider">Theme Fade Speed: <span id="theme-fade-value">0.3s</span></label>
-                        <input type="range" min="0.1" max="1" step="0.1" value="0.3" id="theme-fade-slider">
-                    </div>
+                </div>
+
+                <div class="settings-tab-panel hidden" id="settings-panel-maintenance">
                     <div class="settings-group advanced-actions-container">
                         <button id="trim-library-silence-btn" class="secondary-btn">Trim Start/End Silence in Library</button>
                         <button id="update-ytdlp-btn">Update yt-dlp</button>
@@ -469,6 +482,9 @@
             <span id="mix-details-close-btn" class="modal-close-btn" aria-label="Close">&times;</span>
             <h2 id="mix-details-title">Mix Details</h2>
             <p id="mix-details-summary" class="mix-details-summary"></p>
+            <div class="mix-details-toolbar">
+                <button id="mix-details-save-btn" type="button" class="secondary-btn">Save as new playlist</button>
+            </div>
             <div id="mix-details-content" class="mix-details-content"></div>
         </div>
     </div>

@@ -22,6 +22,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     deletePlaylist: (path) => ipcRenderer.invoke('delete-playlist', path),
     moveTrack: (data) => ipcRenderer.invoke('move-track', data),
     createNewPlaylist: () => ipcRenderer.invoke('create-new-playlist'),
+    createPlaylistFromTracks: (data) => ipcRenderer.invoke('create-playlist-from-tracks', data),
     renamePlaylist: (data) => ipcRenderer.invoke('rename-playlist', data),
     renameTrack: (data) => ipcRenderer.invoke('rename-track', data),
     undoAction: (action) => ipcRenderer.invoke('undo-action', action),
