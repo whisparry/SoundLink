@@ -228,33 +228,112 @@
 }
 
 /* --- Console View --- */
-#download-progress-container {
-    margin-bottom: 15px;
+#console-view {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
 }
 
-.progress-bar-wrapper {
-    width: 100%;
+.console-log-title {
+    margin: 0;
+    font-size: 16px;
+    color: var(--text-secondary);
+}
+
+.console-item-card {
+    background-color: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+    padding: 12px;
+}
+
+.queue-item-card {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.queue-playlists-container {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.console-item-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+}
+
+.console-item-title {
+    margin: 0;
+    font-size: 16px;
+    color: var(--text-primary);
+}
+
+.console-status-text {
+    font-size: 12px;
+    color: var(--text-secondary);
+    text-align: right;
+}
+
+.console-item-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 14px;
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+
+.console-progress-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.console-progress-track {
+    flex: 1;
     height: 8px;
     background-color: var(--bg-tertiary);
-    border-radius: 4px;
+    border-radius: 999px;
     overflow: hidden;
-    margin-bottom: 8px;
 }
 
-#download-progress-bar {
+.console-progress-fill {
     width: 0%;
     height: 100%;
     background-color: var(--accent-primary);
-    border-radius: 4px;
-    transition: width 0.1s linear;
+    border-radius: 999px;
+    transition: width 0.15s linear;
 }
 
-#download-eta {
+.console-progress-label {
+    min-width: 44px;
+    text-align: right;
     font-size: 12px;
     color: var(--text-secondary);
-    text-align: center;
-    display: block;
-    width: 100%;
+}
+
+.playlist-item-card {
+    background-color: var(--bg-tertiary);
+}
+
+.playlist-tracks-container {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding-top: 6px;
+}
+
+.track-item-card {
+    background-color: var(--bg-primary);
+}
+
+.queue-empty-state {
+    margin: 0;
+    font-size: 13px;
+    color: var(--text-secondary);
 }
 
 #create-playlist-btn {

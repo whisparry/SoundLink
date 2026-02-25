@@ -2344,7 +2344,7 @@ app.whenReady().then(() => {
 
                 if (link.includes('spotify.com')) {
                     spotifyLinkCount++;
-                    const { tracks, playlistName, sourceInfo, error } = await getSpotifyTracks(link);
+                    const { tracks, playlistName, playlistOwner, sourceInfo, error } = await getSpotifyTracks(link);
                     if (error) {
                         mainWindow.webContents.send('update-status', `Queue ${queuePosition}/${queuedLinks.length}: error processing Spotify link: ${error}`);
                         continue;
@@ -2352,10 +2352,12 @@ app.whenReady().then(() => {
 
                     const playlistDisplayName = playlistName || `Playlist ${queuePosition}`;
                     const playlistFolderName = sanitizeFilename(playlistDisplayName) || `Playlist ${queuePosition}`;
+                    const sourceType = sourceInfo?.type || 'playlist';
+                    const queueTrackTotal = Array.isArray(tracks) ? tracks.length : 0;
 
                     if (playlistName && !lastPlaylistName) lastPlaylistName = playlistName;
                     if (tracks) {
-                        for (const track of tracks) {
+                        for (const [trackOffset, track] of tracks.entries()) {
                             itemsToProcess.push({
                                 type: 'search',
                                 query: `${track.name} ${track.artist}`,
@@ -2382,6 +2384,10 @@ app.whenReady().then(() => {
                                 queueTotal: queuedLinks.length,
                                 playlistFolderName,
                                 playlistDisplayName,
+                                queueItemType: sourceType,
+                                queueTrackIndex: trackOffset + 1,
+                                queueTrackTotal,
+                                playlistOwner: playlistOwner || '',
                             });
                         }
                     }
@@ -2395,6 +2401,10 @@ app.whenReady().then(() => {
                         queueTotal: queuedLinks.length,
                         playlistFolderName: `Queue ${queuePosition}`,
                         playlistDisplayName: `Queue ${queuePosition}`,
+                        queueItemType: 'direct',
+                        queueTrackIndex: 1,
+                        queueTrackTotal: 1,
+                        playlistOwner: '',
                     });
                 }
             }
@@ -2492,7 +2502,50 @@ app.whenReady().then(() => {
             const linkTrackStartTimes = new Map();
             const linkQueueStartTimeMs = Date.now();
 
-            const updateOverallProgressDuringLinkFinding = () => {
+            const estimateTotalDurationMs = (items) => items.reduce((sum, item) => {
+                const durationMs = item?.sourceTrack?.durationMs;
+                return sum + (Number.isFinite(durationMs) ? durationMs : 0);
+            }, 0);
+
+            const buildProgressPayload = ({
+                progress,
+                eta,
+                phase,
+                statusText,
+                trackProgress = null,
+                contextItem = null,
+                totalTrackCount = totalItems,
+                totalDurationMs = estimateTotalDurationMs(itemsToProcess),
+            }) => {
+                const sourceType = contextItem?.queueItemType || (contextItem?.type === 'direct' ? 'direct' : 'playlist');
+                const queueLabel = contextItem?.playlistDisplayName || contextItem?.queueLabel || null;
+                const trackName = contextItem?.trackName || contextItem?.name || contextItem?.sourceTrack?.name || null;
+                const trackArtist = contextItem?.sourceTrack?.artist || '';
+                const trackDurationMs = contextItem?.sourceTrack?.durationMs;
+
+                return {
+                    progress,
+                    eta,
+                    phase,
+                    statusText,
+                    totalQueueItems: queuedLinks.length,
+                    totalTracks: totalTrackCount,
+                    totalDurationMs: Number.isFinite(totalDurationMs) ? totalDurationMs : 0,
+                    queuePosition: Number.isFinite(contextItem?.queuePosition) ? contextItem.queuePosition : null,
+                    queueTotal: Number.isFinite(contextItem?.queueTotal) ? contextItem.queueTotal : queuedLinks.length,
+                    queueLabel,
+                    sourceType,
+                    playlistOwner: contextItem?.playlistOwner || '',
+                    queueTrackIndex: Number.isFinite(contextItem?.queueTrackIndex) ? contextItem.queueTrackIndex : null,
+                    queueTrackTotal: Number.isFinite(contextItem?.queueTrackTotal) ? contextItem.queueTrackTotal : null,
+                    trackName,
+                    trackArtist,
+                    trackDurationMs: Number.isFinite(trackDurationMs) ? trackDurationMs : null,
+                    trackProgress: Number.isFinite(trackProgress) ? trackProgress : null,
+                };
+            };
+
+            const updateOverallProgressDuringLinkFinding = (activeItem = null) => {
                 const safeTotalItems = totalItems > 0 ? totalItems : 1;
                 const linkPhaseProgressPercent = linkProgress.reduce((sum, value) => sum + value, 0) / safeTotalItems;
                 const overallProgressPercent = Math.min(100, linkPhaseProgressPercent * 0.5);
@@ -2519,11 +2572,19 @@ app.whenReady().then(() => {
                     .filter(value => Number.isFinite(value) && value >= 0)
                     .reduce((sum, value) => sum + value, 0);
                 const hasEta = Number.isFinite(totalEtaMs) && totalEtaMs > 0;
+                const etaText = hasEta ? formatEta(totalEtaMs) : 'calculating...';
 
-                mainWindow.webContents.send('download-progress', {
+                mainWindow.webContents.send('download-progress', buildProgressPayload({
                     progress: overallProgressPercent,
-                    eta: hasEta ? formatEta(totalEtaMs) : 'calculating...',
-                });
+                    eta: etaText,
+                    phase: 'finding-links',
+                    statusText: activeItem?.name
+                        ? `Finding links: ${activeItem.name}`
+                        : `Finding links for ${totalItems} track(s)...`,
+                    trackProgress: Number.isFinite(activeItem?.index) ? linkProgress[activeItem.index] : null,
+                    contextItem: activeItem,
+                    totalTrackCount: totalItems,
+                }));
             };
 
             updateOverallProgressDuringLinkFinding();
@@ -2536,6 +2597,7 @@ app.whenReady().then(() => {
 
                     const startedAt = Date.now();
                     linkTrackStartTimes.set(item.index, startedAt);
+                    updateOverallProgressDuringLinkFinding(item);
 
                     try {
                         let youtubeLink;
@@ -2572,6 +2634,10 @@ app.whenReady().then(() => {
                             queuePosition: item.queuePosition,
                             queueTotal: item.queueTotal,
                             queueLabel: playlistDisplayName,
+                            queueItemType: item.queueItemType || 'direct',
+                            queueTrackIndex: item.queueTrackIndex || 1,
+                            queueTrackTotal: item.queueTrackTotal || 1,
+                            playlistOwner: item.playlistOwner || '',
                         });
                     } catch (error) {
                         if (!isDownloadCancelled) {
@@ -2585,7 +2651,7 @@ app.whenReady().then(() => {
                             activeLinkTimingEstimates[item.index] = null;
                             linkTrackStartTimes.delete(item.index);
                             linkProgress[item.index] = 100;
-                            updateOverallProgressDuringLinkFinding();
+                            updateOverallProgressDuringLinkFinding(item);
                         }
                     }
                 }
@@ -2599,8 +2665,16 @@ app.whenReady().then(() => {
             }
             
             const totalItemsToDownload = itemsToDownload.length;
+            const queueTotalDurationMs = estimateTotalDurationMs(itemsToDownload);
             if (totalItemsToDownload === 0) {
-                mainWindow.webContents.send('download-progress', { progress: 100, eta: 'less than a second remaining' });
+                mainWindow.webContents.send('download-progress', buildProgressPayload({
+                    progress: 100,
+                    eta: 'less than a second remaining',
+                    phase: 'finding-links',
+                    statusText: 'No valid tracks found to download.',
+                    totalTrackCount: 0,
+                    totalDurationMs: 0,
+                }));
                 mainWindow.webContents.send('update-status', 'No valid tracks found to download.', true, { success: true, filesDownloaded: 0 });
                 return;
             }
@@ -2612,7 +2686,7 @@ app.whenReady().then(() => {
             const trackStartTimes = new Map();
             const queueStartTimeMs = Date.now();
 
-            const updateOverallProgress = () => {
+            const updateOverallProgress = (activeItem = null, activeTrackProgress = null) => {
                 const downloadPhaseProgressPercent = totalItemsToDownload > 0
                     ? fileProgress.reduce((sum, value) => sum + value, 0) / totalItemsToDownload
                     : 100;
@@ -2629,7 +2703,18 @@ app.whenReady().then(() => {
                 });
                 const etaString = smartEtaMs !== null ? formatEta(smartEtaMs) : 'calculating...';
 
-                mainWindow.webContents.send('download-progress', { progress: totalProgress, eta: etaString });
+                mainWindow.webContents.send('download-progress', buildProgressPayload({
+                    progress: totalProgress,
+                    eta: etaString,
+                    phase: 'downloading',
+                    statusText: activeItem?.trackName
+                        ? `Downloading: ${activeItem.trackName} ${Math.round(Number.isFinite(activeTrackProgress) ? activeTrackProgress : 0)}%`
+                        : `Downloading ${totalItemsToDownload} track(s)...`,
+                    trackProgress: activeTrackProgress,
+                    contextItem: activeItem,
+                    totalTrackCount: totalItemsToDownload,
+                    totalDurationMs: queueTotalDurationMs,
+                }));
             };
 
             updateOverallProgress();
@@ -2651,7 +2736,7 @@ app.whenReady().then(() => {
                             if (progress > 0) {
                                 activeTrackTimingEstimates[item.queueIndex] = elapsedMs / (progress / 100);
                             }
-                            updateOverallProgress();
+                            updateOverallProgress(item, progress);
                         });
 
                         const finishedAt = Date.now();
@@ -2662,7 +2747,7 @@ app.whenReady().then(() => {
                         trackStartTimes.delete(item.queueIndex);
                         activeTrackTimingEstimates[item.queueIndex] = null;
                         fileProgress[item.queueIndex] = 100;
-                        updateOverallProgress();
+                        updateOverallProgress(item, 100);
                         lastDownloadedFiles.push(filePath);
                         if (item.sourceTrack?.spotifyUrl) {
                             recordDownloadedTrackContext(filePath, item.sourceTrack);
@@ -2683,7 +2768,7 @@ app.whenReady().then(() => {
                         trackStartTimes.delete(item.queueIndex);
                         activeTrackTimingEstimates[item.queueIndex] = null;
                         fileProgress[item.queueIndex] = 100;
-                        updateOverallProgress();
+                        updateOverallProgress(item, 100);
 
                         if (!isDownloadCancelled) {
                             console.error(`Download worker failed:`, error.message);
@@ -2698,7 +2783,14 @@ app.whenReady().then(() => {
                 if (totalItemsToDownload > 0) {
                     pushTimingSample(Date.now() - queueStartTimeMs, 'queueSamples', 'averageQueueDurationMs');
                 }
-                mainWindow.webContents.send('download-progress', { progress: 100, eta: 'less than a second remaining' });
+                mainWindow.webContents.send('download-progress', buildProgressPayload({
+                    progress: 100,
+                    eta: 'less than a second remaining',
+                    phase: 'downloading',
+                    statusText: 'Download queue finished.',
+                    totalTrackCount: totalItemsToDownload,
+                    totalDurationMs: queueTotalDurationMs,
+                }));
                 mainWindow.webContents.send('update-status', 'Task done.', true, { success: true, filesDownloaded: lastDownloadedFiles.length });
             }
 
@@ -2858,11 +2950,13 @@ app.whenReady().then(() => {
         const id = match[2];
         let tracks = [];
         let playlistName = null;
+        let playlistOwner = '';
 
         try {
             if (type === 'playlist') {
                 const playlistData = await spotifyApi.getPlaylist(id);
                 playlistName = playlistData.body.name;
+                playlistOwner = playlistData.body.owner?.display_name || '';
                 let offset = 0;
                 let total = playlistData.body.tracks.total;
                 while (offset < total) {
@@ -2883,6 +2977,9 @@ app.whenReady().then(() => {
             } else if (type === 'album') {
                 const albumData = await spotifyApi.getAlbum(id);
                 playlistName = albumData.body.name;
+                playlistOwner = Array.isArray(albumData.body.artists)
+                    ? albumData.body.artists.map(artist => artist.name).join(', ')
+                    : '';
                 const albumInfo = {
                     album: albumData.body.name,
                     year: albumData.body.release_date ? albumData.body.release_date.substring(0, 4) : '',
@@ -2904,6 +3001,9 @@ app.whenReady().then(() => {
             } else if (type === 'track') {
                 const data = await spotifyApi.getTrack(id);
                 const track = data.body;
+                playlistOwner = Array.isArray(track.artists)
+                    ? track.artists.map(artist => artist.name).join(', ')
+                    : '';
                 tracks.push({
                     spotifyUrl: track.external_urls?.spotify || (track.id ? `https://open.spotify.com/track/${track.id}` : null),
                     spotifyId: track.id || null,
@@ -2912,7 +3012,7 @@ app.whenReady().then(() => {
                     durationMs: track.duration_ms,
                 });
             }
-            return { tracks: tracks.filter(Boolean), playlistName, sourceInfo };
+            return { tracks: tracks.filter(Boolean), playlistName, playlistOwner, sourceInfo };
         } catch (error) {
             let userMessage = `Error fetching from Spotify: ${error.message}`;
             if (error.statusCode === 404) userMessage = 'Error: Spotify resource not found. Check if the link is correct and the playlist/album is public.';

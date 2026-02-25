@@ -108,9 +108,13 @@ window.addEventListener('DOMContentLoaded', () => {
     const spotifyFilterBtn = document.getElementById('spotify-filter-btn');
     const spotifyFilterDropdown = document.getElementById('spotify-filter-dropdown');
     const spotifySearchLimitInput = document.getElementById('spotify-search-limit');
-    const downloadProgressContainer = document.getElementById('download-progress-container');
-    const downloadProgressBar = document.getElementById('download-progress-bar');
-    const downloadEta = document.getElementById('download-eta');
+    const queueStatusText = document.getElementById('queue-status-text');
+    const queueTrackCount = document.getElementById('queue-track-count');
+    const queuePlaylistCount = document.getElementById('queue-playlist-count');
+    const queueDurationTotal = document.getElementById('queue-duration-total');
+    const queueProgressBar = document.getElementById('queue-progress-bar');
+    const queueProgressLabel = document.getElementById('queue-progress-label');
+    const queuePlaylistsContainer = document.getElementById('queue-playlists-container');
     const spectrogramCanvas = document.getElementById('audio-spectrogram-overlay');
     const contextMenu = document.getElementById('context-menu');
 
@@ -186,6 +190,7 @@ window.addEventListener('DOMContentLoaded', () => {
         spectrogramColor: '#3b82f6',
         isDownloadActive: false,
         queuedDownloads: [],
+        consoleQueueModel: null,
     };
 
     // --- Helper Functions ---
@@ -340,6 +345,10 @@ window.addEventListener('DOMContentLoaded', () => {
                 appDialogInput.classList.add('hidden');
                 appDialogInput.value = '';
                 appDialogInput.placeholder = '';
+            }
+
+            if (mixDetailsModal && !mixDetailsModal.classList.contains('hidden')) {
+                mixDetailsModal.classList.add('hidden');
             }
 
             appDialogModal.classList.remove('hidden');
@@ -534,9 +543,13 @@ window.addEventListener('DOMContentLoaded', () => {
             spotifyFilterDropdown,
             spotifySearchLimitInput,
             checkForUpdatesBtn,
-            downloadProgressContainer,
-            downloadProgressBar,
-            downloadEta,
+            queueStatusText,
+            queueTrackCount,
+            queuePlaylistCount,
+            queueDurationTotal,
+            queueProgressBar,
+            queueProgressLabel,
+            queuePlaylistsContainer,
             spectrogramCanvas,
             shuffleBtn,
             repeatBtn,
@@ -1375,6 +1388,353 @@ window.addEventListener('DOMContentLoaded', () => {
         consoleOutput.scrollTop = consoleOutput.scrollHeight;
     }
 
+    const clampPercent = (value) => {
+        const numeric = Number.parseFloat(value);
+        if (!Number.isFinite(numeric)) return 0;
+        return Math.max(0, Math.min(100, numeric));
+    };
+
+    const formatDurationFromMs = (durationMs) => {
+        if (!Number.isFinite(durationMs) || durationMs <= 0) return '0:00';
+        const totalSeconds = Math.floor(durationMs / 1000);
+        const hours = Math.floor(totalSeconds / 3600);
+        const minutes = Math.floor((totalSeconds % 3600) / 60);
+        const seconds = totalSeconds % 60;
+        if (hours > 0) return `${hours}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+        return `${minutes}:${String(seconds).padStart(2, '0')}`;
+    };
+
+    const parseSpotifySourceTypeFromLink = (link) => {
+        if (typeof link !== 'string') return 'direct';
+        const match = link.match(/spotify\.com\/(playlist|album|track)\//i);
+        if (!match) return 'direct';
+        return match[1].toLowerCase();
+    };
+
+    const createConsoleQueueModel = () => ({
+        totalQueueItems: 0,
+        totalTracks: 0,
+        totalDurationMs: 0,
+        progress: 0,
+        eta: 'calculating...',
+        statusText: 'Idle',
+        items: [],
+        itemsByQueuePosition: new Map(),
+    });
+
+    const createQueueItemFromLink = (link, queuePosition) => {
+        const sourceType = parseSpotifySourceTypeFromLink(link);
+        const isPlaylistCard = sourceType === 'playlist' || sourceType === 'album';
+        if (isPlaylistCard) {
+            return {
+                kind: 'playlist',
+                sourceType,
+                queuePosition,
+                title: `Queue ${queuePosition}`,
+                owner: 'Unknown',
+                totalTracks: 0,
+                durationMs: 0,
+                progress: 0,
+                tracks: [],
+                tracksByKey: new Map(),
+            };
+        }
+
+        return {
+            kind: 'track',
+            sourceType,
+            queuePosition,
+            title: `Queue ${queuePosition}`,
+            artist: '',
+            durationMs: 0,
+            progress: 0,
+        };
+    };
+
+    const initializeConsoleQueueFromLinks = (links) => {
+        const model = createConsoleQueueModel();
+        model.totalQueueItems = Array.isArray(links) ? links.length : 0;
+        model.statusText = model.totalQueueItems > 0
+            ? `Preparing queue with ${model.totalQueueItems} item(s)...`
+            : 'Idle';
+
+        if (Array.isArray(links)) {
+            links.forEach((link, index) => {
+                const queuePosition = index + 1;
+                const item = createQueueItemFromLink(link, queuePosition);
+                model.items.push(item);
+                model.itemsByQueuePosition.set(queuePosition, item);
+            });
+        }
+
+        state.consoleQueueModel = model;
+        renderConsoleQueueModel();
+    };
+
+    const getDerivedTrackCount = (model) => {
+        if (!model) return 0;
+        if (Number.isFinite(model.totalTracks) && model.totalTracks > 0) return model.totalTracks;
+        return model.items.reduce((count, item) => {
+            if (item.kind === 'playlist') {
+                return count + Math.max(item.totalTracks || 0, item.tracks.length);
+            }
+            return count + 1;
+        }, 0);
+    };
+
+    const getDerivedDurationMs = (model) => {
+        if (!model) return 0;
+        if (Number.isFinite(model.totalDurationMs) && model.totalDurationMs > 0) return model.totalDurationMs;
+        return model.items.reduce((total, item) => {
+            if (item.kind === 'playlist') {
+                const trackDuration = item.tracks.reduce((sum, track) => sum + (Number.isFinite(track.durationMs) ? track.durationMs : 0), 0);
+                return total + Math.max(trackDuration, Number.isFinite(item.durationMs) ? item.durationMs : 0);
+            }
+            return total + (Number.isFinite(item.durationMs) ? item.durationMs : 0);
+        }, 0);
+    };
+
+    const renderProgressRow = ({ progress = 0 }) => {
+        const row = document.createElement('div');
+        row.className = 'console-progress-row';
+
+        const track = document.createElement('div');
+        track.className = 'console-progress-track';
+        const fill = document.createElement('div');
+        fill.className = 'console-progress-fill';
+        fill.style.width = `${clampPercent(progress)}%`;
+        track.appendChild(fill);
+
+        const label = document.createElement('span');
+        label.className = 'console-progress-label';
+        label.textContent = `${Math.round(clampPercent(progress))}%`;
+
+        row.appendChild(track);
+        row.appendChild(label);
+        return row;
+    };
+
+    const buildTrackCard = (track) => {
+        const trackCard = document.createElement('div');
+        trackCard.className = 'console-item-card track-item-card';
+
+        const header = document.createElement('div');
+        header.className = 'console-item-card-header';
+        const title = document.createElement('h4');
+        title.className = 'console-item-title';
+        title.textContent = track.title || 'Unknown Track';
+        header.appendChild(title);
+        trackCard.appendChild(header);
+
+        const meta = document.createElement('div');
+        meta.className = 'console-item-meta';
+        const artist = document.createElement('span');
+        artist.textContent = `Artist: ${track.artist || 'Unknown'}`;
+        const duration = document.createElement('span');
+        duration.textContent = `Duration: ${formatDurationFromMs(track.durationMs)}`;
+        meta.appendChild(artist);
+        meta.appendChild(duration);
+        trackCard.appendChild(meta);
+
+        trackCard.appendChild(renderProgressRow({ progress: track.progress || 0 }));
+        return trackCard;
+    };
+
+    const renderConsoleQueueModel = () => {
+        const model = state.consoleQueueModel || createConsoleQueueModel();
+        const queueItems = Array.isArray(model.items) ? model.items : [];
+        const playlistCount = queueItems.filter(item => item.kind === 'playlist').length;
+        const totalTracks = getDerivedTrackCount(model);
+        const totalDurationMs = getDerivedDurationMs(model);
+
+        if (queueStatusText) queueStatusText.textContent = model.statusText || 'Idle';
+        if (queueTrackCount) queueTrackCount.textContent = `Tracks: ${totalTracks}`;
+        if (queuePlaylistCount) queuePlaylistCount.textContent = `Playlists: ${playlistCount}`;
+        if (queueDurationTotal) queueDurationTotal.textContent = `Duration: ${formatDurationFromMs(totalDurationMs)}`;
+        if (queueProgressBar) queueProgressBar.style.width = `${clampPercent(model.progress)}%`;
+        if (queueProgressLabel) queueProgressLabel.textContent = `${Math.round(clampPercent(model.progress))}%`;
+        if (!queuePlaylistsContainer) return;
+
+        queuePlaylistsContainer.innerHTML = '';
+        if (queueItems.length === 0) {
+            const emptyState = document.createElement('p');
+            emptyState.className = 'queue-empty-state';
+            emptyState.textContent = 'No active queue items.';
+            queuePlaylistsContainer.appendChild(emptyState);
+            return;
+        }
+
+        queueItems
+            .slice()
+            .sort((a, b) => (a.queuePosition || 0) - (b.queuePosition || 0))
+            .forEach((item) => {
+                if (item.kind === 'playlist') {
+                    const playlistCard = document.createElement('div');
+                    playlistCard.className = 'console-item-card playlist-item-card';
+
+                    const header = document.createElement('div');
+                    header.className = 'console-item-card-header';
+                    const title = document.createElement('h3');
+                    title.className = 'console-item-title';
+                    title.textContent = item.title || `Playlist ${item.queuePosition || ''}`.trim();
+                    const status = document.createElement('span');
+                    status.className = 'console-status-text';
+                    status.textContent = `Queue ${item.queuePosition || '?'}`;
+                    header.appendChild(title);
+                    header.appendChild(status);
+                    playlistCard.appendChild(header);
+
+                    const meta = document.createElement('div');
+                    meta.className = 'console-item-meta';
+                    const owner = document.createElement('span');
+                    owner.textContent = `Creator: ${item.owner || 'Unknown'}`;
+                    const tracks = document.createElement('span');
+                    tracks.textContent = `Tracks: ${Math.max(item.totalTracks || 0, item.tracks.length)}`;
+                    const duration = document.createElement('span');
+                    duration.textContent = `Duration: ${formatDurationFromMs(item.durationMs)}`;
+                    meta.appendChild(owner);
+                    meta.appendChild(tracks);
+                    meta.appendChild(duration);
+                    playlistCard.appendChild(meta);
+
+                    playlistCard.appendChild(renderProgressRow({ progress: item.progress || 0 }));
+
+                    const tracksContainer = document.createElement('div');
+                    tracksContainer.className = 'playlist-tracks-container';
+                    item.tracks
+                        .slice()
+                        .sort((a, b) => (a.order || 0) - (b.order || 0))
+                        .forEach(track => tracksContainer.appendChild(buildTrackCard(track)));
+                    playlistCard.appendChild(tracksContainer);
+                    queuePlaylistsContainer.appendChild(playlistCard);
+                    return;
+                }
+
+                queuePlaylistsContainer.appendChild(buildTrackCard(item));
+            });
+    };
+
+    const updateConsoleQueueFromProgress = (payload = {}) => {
+        if (!state.consoleQueueModel) {
+            state.consoleQueueModel = createConsoleQueueModel();
+        }
+
+        const model = state.consoleQueueModel;
+        model.progress = clampPercent(payload.progress);
+        model.eta = typeof payload.eta === 'string' ? payload.eta : model.eta;
+
+        if (Number.isFinite(payload.totalQueueItems) && payload.totalQueueItems >= 0) {
+            model.totalQueueItems = payload.totalQueueItems;
+        }
+        if (Number.isFinite(payload.totalTracks) && payload.totalTracks >= 0) {
+            model.totalTracks = payload.totalTracks;
+        }
+        if (Number.isFinite(payload.totalDurationMs) && payload.totalDurationMs >= 0) {
+            model.totalDurationMs = payload.totalDurationMs;
+        }
+
+        const trackProgress = clampPercent(payload.trackProgress);
+        const defaultStatus = `Estimated time remaining: ${model.eta || 'calculating...'}`;
+        if (typeof payload.statusText === 'string' && payload.statusText.trim()) {
+            model.statusText = payload.statusText.trim();
+        } else if (payload.phase === 'downloading' && payload.trackName) {
+            model.statusText = `Downloading: ${payload.trackName} ${Math.round(trackProgress)}%`;
+        } else if (payload.phase === 'finding-links' && payload.trackName) {
+            model.statusText = `Finding link: ${payload.trackName}`;
+        } else {
+            model.statusText = defaultStatus;
+        }
+
+        const queuePosition = Number.parseInt(payload.queuePosition, 10);
+        if (!Number.isFinite(queuePosition) || queuePosition <= 0) {
+            renderConsoleQueueModel();
+            return;
+        }
+
+        const queueTrackTotal = Number.parseInt(payload.queueTrackTotal, 10);
+        const queueTrackIndex = Number.parseInt(payload.queueTrackIndex, 10);
+        const sourceType = typeof payload.sourceType === 'string' ? payload.sourceType : 'direct';
+        const isPlaylistCard = sourceType === 'playlist' || sourceType === 'album' || (Number.isFinite(queueTrackTotal) && queueTrackTotal > 1 && sourceType !== 'track' && sourceType !== 'direct');
+
+        let item = model.itemsByQueuePosition.get(queuePosition);
+        const shouldReplaceItem = !item || (isPlaylistCard && item.kind !== 'playlist') || (!isPlaylistCard && item.kind !== 'track');
+        if (shouldReplaceItem) {
+            item = isPlaylistCard
+                ? {
+                    kind: 'playlist',
+                    sourceType,
+                    queuePosition,
+                    title: payload.queueLabel || `Queue ${queuePosition}`,
+                    owner: payload.playlistOwner || 'Unknown',
+                    totalTracks: Number.isFinite(queueTrackTotal) ? queueTrackTotal : 0,
+                    durationMs: Number.isFinite(payload.playlistDurationMs) ? payload.playlistDurationMs : 0,
+                    progress: 0,
+                    tracks: [],
+                    tracksByKey: new Map(),
+                }
+                : {
+                    kind: 'track',
+                    sourceType,
+                    queuePosition,
+                    title: payload.trackName || payload.queueLabel || `Queue ${queuePosition}`,
+                    artist: payload.trackArtist || '',
+                    durationMs: Number.isFinite(payload.trackDurationMs) ? payload.trackDurationMs : 0,
+                    progress: 0,
+                };
+
+            const existingIndex = model.items.findIndex(entry => entry.queuePosition === queuePosition);
+            if (existingIndex >= 0) model.items[existingIndex] = item;
+            else model.items.push(item);
+            model.itemsByQueuePosition.set(queuePosition, item);
+        }
+
+        if (item.kind === 'playlist') {
+            if (typeof payload.queueLabel === 'string' && payload.queueLabel.trim()) item.title = payload.queueLabel.trim();
+            if (typeof payload.playlistOwner === 'string' && payload.playlistOwner.trim()) item.owner = payload.playlistOwner.trim();
+            if (Number.isFinite(queueTrackTotal) && queueTrackTotal > 0) item.totalTracks = queueTrackTotal;
+
+            const canCalculatePlaylistProgress = Number.isFinite(queueTrackTotal) && queueTrackTotal > 0 && Number.isFinite(queueTrackIndex) && queueTrackIndex > 0;
+            if (canCalculatePlaylistProgress) {
+                item.progress = clampPercent((((queueTrackIndex - 1) + (trackProgress / 100)) / queueTrackTotal) * 100);
+            }
+
+            if (typeof payload.trackName === 'string' && payload.trackName.trim()) {
+                const trackKey = Number.isFinite(queueTrackIndex) && queueTrackIndex > 0
+                    ? String(queueTrackIndex)
+                    : payload.trackName.trim().toLowerCase();
+                let track = item.tracksByKey.get(trackKey);
+                if (!track) {
+                    track = {
+                        key: trackKey,
+                        order: Number.isFinite(queueTrackIndex) ? queueTrackIndex : item.tracks.length + 1,
+                        title: payload.trackName.trim(),
+                        artist: payload.trackArtist || '',
+                        durationMs: Number.isFinite(payload.trackDurationMs) ? payload.trackDurationMs : 0,
+                        progress: 0,
+                    };
+                    item.tracksByKey.set(trackKey, track);
+                    item.tracks.push(track);
+                }
+
+                track.title = payload.trackName.trim();
+                track.artist = payload.trackArtist || track.artist || '';
+                if (Number.isFinite(payload.trackDurationMs) && payload.trackDurationMs > 0) {
+                    track.durationMs = payload.trackDurationMs;
+                }
+                track.progress = trackProgress;
+            }
+
+            item.durationMs = item.tracks.reduce((sum, track) => sum + (Number.isFinite(track.durationMs) ? track.durationMs : 0), 0);
+        } else {
+            if (typeof payload.trackName === 'string' && payload.trackName.trim()) item.title = payload.trackName.trim();
+            if (typeof payload.trackArtist === 'string') item.artist = payload.trackArtist;
+            if (Number.isFinite(payload.trackDurationMs) && payload.trackDurationMs > 0) item.durationMs = payload.trackDurationMs;
+            item.progress = trackProgress;
+        }
+
+        renderConsoleQueueModel();
+    };
+
     const getLinksFromInput = () => linksInput.value
         .split('\n')
         .map(link => link.trim())
@@ -1411,10 +1771,8 @@ window.addEventListener('DOMContentLoaded', () => {
         if (clearConsole) {
             consoleOutput.innerHTML = '';
         }
+        initializeConsoleQueueFromLinks(normalizedLinks);
         createPlaylistBtn.classList.add('hidden');
-        downloadProgressContainer.classList.remove('hidden');
-        downloadProgressBar.style.width = '0%';
-        downloadEta.textContent = 'Estimated time remaining: calculating...';
         setDownloadUiState({ active: true });
         window.electronAPI.startDownload(normalizedLinks);
     };
@@ -1457,7 +1815,13 @@ window.addEventListener('DOMContentLoaded', () => {
 
             state.queuedDownloads = [];
             setDownloadUiState({ active: false });
-            downloadProgressContainer.classList.add('hidden');
+            if (state.consoleQueueModel) {
+                state.consoleQueueModel.statusText = payload?.success ? 'Completed' : message;
+                if (payload?.success) {
+                    state.consoleQueueModel.progress = 100;
+                }
+                renderConsoleQueueModel();
+            }
         }
     });
 
@@ -1501,12 +1865,20 @@ window.addEventListener('DOMContentLoaded', () => {
         log('Download cancel requested from small cancel button');
         state.queuedDownloads = [];
         setDownloadUiState({ active: false });
+        if (state.consoleQueueModel) {
+            state.consoleQueueModel.statusText = 'Cancelling download...';
+            renderConsoleQueueModel();
+        }
         window.electronAPI.cancelDownload();
     });
     bigCancelBtn.addEventListener('click', () => {
         log('Download cancel requested from console cancel button');
         state.queuedDownloads = [];
         setDownloadUiState({ active: false });
+        if (state.consoleQueueModel) {
+            state.consoleQueueModel.statusText = 'Cancelling download...';
+            renderConsoleQueueModel();
+        }
         window.electronAPI.cancelDownload();
     });
     createPlaylistBtn.addEventListener('click', async () => {
@@ -1714,13 +2086,13 @@ window.addEventListener('DOMContentLoaded', () => {
         window.electronAPI.restartApp();
     });
 
-    window.electronAPI.onDownloadProgress(({ progress, eta }) => {
-        log('Download progress event', { progress, eta });
-        if (downloadProgressBar) downloadProgressBar.style.width = `${progress}%`;
-        if (downloadEta) downloadEta.textContent = `Estimated time remaining: ${eta}`;
+    window.electronAPI.onDownloadProgress((payload = {}) => {
+        log('Download progress event', payload);
+        updateConsoleQueueFromProgress(payload);
     });
 
     // --- Initial Load ---
+    renderConsoleQueueModel();
     initializeClearButtons();
     loadNotificationHistory();
     loadInitialSettings();

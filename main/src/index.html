@@ -506,13 +506,27 @@
 
             <!-- Console View -->
             <div id="console-view" class="view">
-                <h2>Console Output</h2>
-                <div id="download-progress-container" class="hidden">
-                    <div class="progress-bar-wrapper">
-                        <div id="download-progress-bar"></div>
+                <h2>Console Queue</h2>
+                <div id="queue-item-card" class="console-item-card queue-item-card">
+                    <div class="console-item-card-header">
+                        <h3 class="console-item-title">Queue</h3>
+                        <span id="queue-status-text" class="console-status-text">Idle</span>
                     </div>
-                    <span id="download-eta"></span>
+                    <div class="console-item-meta" id="queue-meta">
+                        <span id="queue-track-count">Tracks: 0</span>
+                        <span id="queue-playlist-count">Playlists: 0</span>
+                        <span id="queue-duration-total">Duration: 0:00</span>
+                    </div>
+                    <div class="console-progress-row">
+                        <div class="console-progress-track">
+                            <div id="queue-progress-bar" class="console-progress-fill"></div>
+                        </div>
+                        <span id="queue-progress-label" class="console-progress-label">0%</span>
+                    </div>
+                    <div id="queue-playlists-container" class="queue-playlists-container"></div>
                 </div>
+
+                <h3 class="console-log-title">Activity Log</h3>
                 <div id="console-output" class="console-output"></div>
                 <button id="big-cancel-btn" class="hidden">Cancel Download</button>
                 <button id="create-playlist-btn" class="hidden">Create Playlist</button>
