@@ -50,6 +50,7 @@ const trayIconPath = path.join(assetsPath, 'icon.png');
 const configPath = path.join(app.getPath('userData'), 'config.json');
 const statsPath = path.join(app.getPath('userData'), 'stats.json');
 const cachePath = path.join(app.getPath('userData'), 'link_cache.json');
+const downloadCachePath = path.join(app.getPath('userData'), 'download_cache.json');
 const trackTagsPath = path.join(app.getPath('userData'), 'track_tags.json');
 const playlistTagsPath = path.join(app.getPath('userData'), 'playlist_tags.json');
 const metadataCachePath = path.join(app.getPath('userData'), 'track_metadata_cache.json');
@@ -66,6 +67,7 @@ const ytdlpThreadInstancesDir = path.join(app.getPath('userData'), 'yt-dlp-threa
 let config = {};
 let stats = {};
 let linkCache = {};
+let downloadCache = {};
 let trackTags = {};
 let playlistTags = {};
 let metadataCache = {};
@@ -394,6 +396,229 @@ function saveCache() {
         safeWriteFileSync(cachePath, JSON.stringify(linkCache, null, 4));
     } catch (error) {
         console.error('Failed to save link cache file:', error);
+    }
+}
+
+function normalizeDownloadCacheShape(parsed) {
+    const rawEntries = parsed && typeof parsed === 'object' && parsed.entries && typeof parsed.entries === 'object'
+        ? parsed.entries
+        : {};
+
+    const normalizedEntries = {};
+    for (const [rawKey, value] of Object.entries(rawEntries)) {
+        if (typeof rawKey !== 'string' || !rawKey.trim()) continue;
+        if (!value || typeof value !== 'object') continue;
+
+        const normalizedKey = rawKey.trim();
+        normalizedEntries[normalizedKey] = {
+            key: normalizedKey,
+            sourceUrl: typeof value.sourceUrl === 'string' ? value.sourceUrl : null,
+            spotifyUrl: typeof value.spotifyUrl === 'string' ? value.spotifyUrl : null,
+            spotifyId: typeof value.spotifyId === 'string' ? value.spotifyId : null,
+            name: typeof value.name === 'string' ? value.name : '',
+            artist: typeof value.artist === 'string' ? value.artist : '',
+            durationMs: Number.isFinite(value.durationMs) ? value.durationMs : null,
+            localPath: typeof value.localPath === 'string' ? value.localPath : null,
+            playlistPath: typeof value.playlistPath === 'string' ? value.playlistPath : null,
+            fileName: typeof value.fileName === 'string' ? value.fileName : null,
+            fileSize: Number.isFinite(value.fileSize) ? value.fileSize : null,
+            downloadedAt: typeof value.downloadedAt === 'string' ? value.downloadedAt : null,
+            updatedAt: typeof value.updatedAt === 'string' ? value.updatedAt : null,
+        };
+    }
+
+    return {
+        version: 1,
+        entries: normalizedEntries,
+    };
+}
+
+function loadDownloadCache() {
+    try {
+        if (fs.existsSync(downloadCachePath)) {
+            const parsed = JSON.parse(fs.readFileSync(downloadCachePath, 'utf-8'));
+            downloadCache = normalizeDownloadCacheShape(parsed);
+        } else {
+            downloadCache = normalizeDownloadCacheShape({});
+            fs.writeFileSync(downloadCachePath, JSON.stringify(downloadCache, null, 4));
+        }
+    } catch (error) {
+        console.error('Failed to load or create download cache file:', error);
+        downloadCache = normalizeDownloadCacheShape({});
+    }
+}
+
+function saveDownloadCache() {
+    try {
+        safeWriteFileSync(downloadCachePath, JSON.stringify(downloadCache, null, 4));
+    } catch (error) {
+        console.error('Failed to save download cache file:', error);
+    }
+}
+
+function buildDownloadCacheKey({ spotifyUrl, sourceUrl, localPath }) {
+    if (typeof spotifyUrl === 'string' && spotifyUrl.trim()) {
+        return `spotify:${spotifyUrl.trim().toLowerCase()}`;
+    }
+    if (typeof sourceUrl === 'string' && sourceUrl.trim()) {
+        return `source:${sourceUrl.trim().toLowerCase()}`;
+    }
+    const normalizedPath = normalizePathKey(localPath);
+    if (normalizedPath) {
+        return `file:${normalizedPath}`;
+    }
+    return '';
+}
+
+function upsertDownloadCacheEntry({
+    sourceUrl = null,
+    spotifyUrl = null,
+    spotifyId = null,
+    name = '',
+    artist = '',
+    durationMs = null,
+    localPath = null,
+    playlistPath = null,
+    downloadedAt = null,
+}) {
+    const key = buildDownloadCacheKey({ spotifyUrl, sourceUrl, localPath });
+    if (!key) return;
+
+    const existing = downloadCache.entries[key] || {};
+    let fileName = null;
+    let fileSize = null;
+    if (localPath && fs.existsSync(localPath)) {
+        fileName = path.basename(localPath);
+        try {
+            const stats = fs.statSync(localPath);
+            fileSize = Number.isFinite(stats.size) ? stats.size : null;
+        } catch {
+            fileSize = null;
+        }
+    }
+
+    const nowIso = new Date().toISOString();
+    downloadCache.entries[key] = {
+        key,
+        sourceUrl: sourceUrl || existing.sourceUrl || null,
+        spotifyUrl: spotifyUrl || existing.spotifyUrl || null,
+        spotifyId: spotifyId || existing.spotifyId || null,
+        name: name || existing.name || '',
+        artist: artist || existing.artist || '',
+        durationMs: Number.isFinite(durationMs) ? durationMs : (Number.isFinite(existing.durationMs) ? existing.durationMs : null),
+        localPath: localPath || existing.localPath || null,
+        playlistPath: playlistPath || existing.playlistPath || null,
+        fileName: fileName || existing.fileName || null,
+        fileSize: Number.isFinite(fileSize) ? fileSize : (Number.isFinite(existing.fileSize) ? existing.fileSize : null),
+        downloadedAt: downloadedAt || existing.downloadedAt || nowIso,
+        updatedAt: nowIso,
+    };
+    saveDownloadCache();
+}
+
+function removeDownloadCacheByLocalPath(localPath) {
+    const normalizedTarget = normalizePathKey(localPath);
+    if (!normalizedTarget) return;
+
+    let hasChanges = false;
+    for (const [entryKey, entry] of Object.entries(downloadCache.entries || {})) {
+        if (normalizePathKey(entry.localPath) === normalizedTarget) {
+            delete downloadCache.entries[entryKey];
+            hasChanges = true;
+        }
+    }
+
+    if (hasChanges) {
+        saveDownloadCache();
+    }
+}
+
+function moveDownloadCachePath(oldPath, newPath) {
+    const normalizedOldPath = normalizePathKey(oldPath);
+    const normalizedNewPath = normalizePathKey(newPath);
+    if (!normalizedOldPath || !normalizedNewPath || normalizedOldPath === normalizedNewPath) return;
+
+    let hasChanges = false;
+    const nowIso = new Date().toISOString();
+    for (const [entryKey, entry] of Object.entries(downloadCache.entries || {})) {
+        if (normalizePathKey(entry.localPath) !== normalizedOldPath) continue;
+
+        entry.localPath = newPath;
+        entry.fileName = path.basename(newPath);
+        entry.playlistPath = path.dirname(newPath);
+        entry.updatedAt = nowIso;
+
+        const desiredKey = buildDownloadCacheKey({ spotifyUrl: entry.spotifyUrl, sourceUrl: entry.sourceUrl, localPath: newPath });
+        if (desiredKey && desiredKey !== entryKey) {
+            delete downloadCache.entries[entryKey];
+            entry.key = desiredKey;
+            downloadCache.entries[desiredKey] = entry;
+        }
+
+        hasChanges = true;
+    }
+
+    if (hasChanges) {
+        saveDownloadCache();
+    }
+}
+
+function moveDownloadCachePlaylistPath(oldPlaylistPath, newPlaylistPath) {
+    const normalizedOldPlaylistPath = normalizePathKey(oldPlaylistPath);
+    const normalizedNewPlaylistPath = normalizePathKey(newPlaylistPath);
+    if (!normalizedOldPlaylistPath || !normalizedNewPlaylistPath || normalizedOldPlaylistPath === normalizedNewPlaylistPath) return;
+
+    let hasChanges = false;
+    const nowIso = new Date().toISOString();
+    for (const [entryKey, entry] of Object.entries(downloadCache.entries || {})) {
+        const entryPlaylistPath = normalizePathKey(entry.playlistPath);
+        const entryLocalPath = normalizePathKey(entry.localPath);
+        if (entryPlaylistPath !== normalizedOldPlaylistPath && !(entryLocalPath && entryLocalPath.startsWith(`${normalizedOldPlaylistPath}${path.sep}`))) {
+            continue;
+        }
+
+        const nextLocalPath = entry.localPath
+            ? path.join(newPlaylistPath, path.basename(entry.localPath))
+            : entry.localPath;
+
+        entry.playlistPath = newPlaylistPath;
+        entry.localPath = nextLocalPath;
+        entry.fileName = nextLocalPath ? path.basename(nextLocalPath) : entry.fileName;
+        entry.updatedAt = nowIso;
+
+        const desiredKey = buildDownloadCacheKey({ spotifyUrl: entry.spotifyUrl, sourceUrl: entry.sourceUrl, localPath: nextLocalPath });
+        if (desiredKey && desiredKey !== entryKey) {
+            delete downloadCache.entries[entryKey];
+            entry.key = desiredKey;
+            downloadCache.entries[desiredKey] = entry;
+        }
+
+        hasChanges = true;
+    }
+
+    if (hasChanges) {
+        saveDownloadCache();
+    }
+}
+
+function removeDownloadCacheByPlaylistPath(playlistPath) {
+    const normalizedPlaylistPath = normalizePathKey(playlistPath);
+    if (!normalizedPlaylistPath) return;
+
+    let hasChanges = false;
+    for (const [entryKey, entry] of Object.entries(downloadCache.entries || {})) {
+        const entryPlaylistPath = normalizePathKey(entry.playlistPath);
+        const entryLocalPath = normalizePathKey(entry.localPath);
+        const isInPlaylist = entryPlaylistPath === normalizedPlaylistPath
+            || (entryLocalPath && entryLocalPath.startsWith(`${normalizedPlaylistPath}${path.sep}`));
+        if (!isInPlaylist) continue;
+
+        delete downloadCache.entries[entryKey];
+        hasChanges = true;
+    }
+
+    if (hasChanges) {
+        saveDownloadCache();
     }
 }
 
@@ -822,6 +1047,7 @@ writeLog('info', 'Main', 'App bootstrap started', { isDev, currentLogLevel });
 loadConfig();
 loadStats();
 loadCache();
+loadDownloadCache();
 loadTrackTags();
 loadPlaylistTags();
 loadMetadataCache();
@@ -1183,7 +1409,9 @@ app.whenReady().then(() => {
     ipcMain.handle('clear-link-cache', () => {
         linkCache = {};
         saveCache();
-        return { success: true, message: 'Link cache cleared successfully.' };
+        downloadCache = normalizeDownloadCacheShape({});
+        saveDownloadCache();
+        return { success: true, message: 'Link cache and download cache cleared successfully.' };
     });
 
     ipcMain.handle('get-default-settings', () => {
@@ -1634,6 +1862,7 @@ app.whenReady().then(() => {
                 }
             }
             savePlaylistSyncCache();
+            removeDownloadCacheByLocalPath(filePath);
             const moved = await moveToUndoTrash(filePath);
             return {
                 success: true,
@@ -1660,6 +1889,7 @@ app.whenReady().then(() => {
             const destinationPath = path.join(destinationPlaylistPath, fileName);
             await fs.promises.rename(sourcePath, destinationPath);
             moveTrackTagsPath(sourcePath, destinationPath);
+            moveDownloadCachePath(sourcePath, destinationPath);
 
             for (const playlistEntry of Object.values(playlistSyncCache.playlists || {})) {
                 for (const [spotifyUrl, trackEntry] of Object.entries(playlistEntry.tracks || {})) {
@@ -1692,6 +1922,7 @@ app.whenReady().then(() => {
             await fs.promises.rename(oldPath, newPath);
             movePlaylistTagsPath(oldPath, newPath);
             movePlaylistSyncEntry(oldPath, newPath);
+            moveDownloadCachePlaylistPath(oldPath, newPath);
             return { success: true, newPath };
         } catch (error) {
             console.error(`Failed to rename playlist from ${oldPath} to ${newName}`, error);
@@ -1815,6 +2046,7 @@ app.whenReady().then(() => {
                 return { success: false, error: 'Playlist folder does not exist.' };
             }
             removePlaylistSyncEntry(playlistPath);
+            removeDownloadCacheByPlaylistPath(playlistPath);
             const moved = await moveToUndoTrash(playlistPath);
             return {
                 success: true,
@@ -1859,6 +2091,7 @@ app.whenReady().then(() => {
 
                 await fs.promises.rename(currentPath, targetPath);
                 movePlaylistTagsPath(currentPath, targetPath);
+                moveDownloadCachePlaylistPath(currentPath, targetPath);
                 return { success: true, restoredPath: targetPath };
             }
 
@@ -1882,6 +2115,7 @@ app.whenReady().then(() => {
 
                 await fs.promises.rename(currentPath, targetPath);
                 moveTrackTagsPath(currentPath, targetPath);
+                moveDownloadCachePath(currentPath, targetPath);
                 return { success: true, restoredPath: targetPath };
             }
 
@@ -1949,6 +2183,7 @@ app.whenReady().then(() => {
 
             await fs.promises.rename(oldPath, newPath);
             moveTrackTagsPath(oldPath, newPath);
+            moveDownloadCachePath(oldPath, newPath);
 
             for (const playlistEntry of Object.values(playlistSyncCache.playlists || {})) {
                 for (const trackEntry of Object.values(playlistEntry.tracks || {})) {
@@ -2432,6 +2667,17 @@ app.whenReady().then(() => {
                         if (item.sourceTrack?.spotifyUrl) {
                             recordDownloadedTrackContext(filePath, item.sourceTrack);
                         }
+                        upsertDownloadCacheEntry({
+                            sourceUrl: item.youtubeLink,
+                            spotifyUrl: item.sourceTrack?.spotifyUrl || null,
+                            spotifyId: item.sourceTrack?.spotifyId || null,
+                            name: item.sourceTrack?.name || item.trackName,
+                            artist: item.sourceTrack?.artist || '',
+                            durationMs: Number.isFinite(item.sourceTrack?.durationMs) ? item.sourceTrack.durationMs : null,
+                            localPath: filePath,
+                            playlistPath: item.outputDir,
+                            downloadedAt: new Date().toISOString(),
+                        });
                         stats.totalSongsDownloaded = (stats.totalSongsDownloaded || 0) + 1;
                     } catch (error) {
                         trackStartTimes.delete(item.queueIndex);
@@ -2544,6 +2790,7 @@ app.whenReady().then(() => {
                 if (fs.existsSync(oldPath)) {
                     const newPath = path.join(folderName, path.basename(oldPath));
                     fs.renameSync(oldPath, newPath);
+                    moveDownloadCachePath(oldPath, newPath);
                     const context = lastDownloadedTrackContexts[normalizePathKey(oldPath)] || null;
                     movedTracks.push({ oldPath, newPath, position: movedCount, context });
                     movedCount++;
@@ -2765,6 +3012,7 @@ app.whenReady().then(() => {
                 await fs.promises.rename(playlistPath, renamedPath);
                 movePlaylistTagsPath(playlistPath, renamedPath);
                 movePlaylistSyncEntry(playlistPath, renamedPath);
+                moveDownloadCachePlaylistPath(playlistPath, renamedPath);
                 effectivePlaylistPath = renamedPath;
             }
         }
@@ -2790,6 +3038,9 @@ app.whenReady().then(() => {
         let removedCount = 0;
         for (const spotifyUrl of removedUrls) {
             const cachedTrack = cachedTracks[spotifyUrl];
+            if (cachedTrack?.localPath) {
+                removeDownloadCacheByLocalPath(cachedTrack.localPath);
+            }
             if (cachedTrack?.localPath && fs.existsSync(cachedTrack.localPath)) {
                 await fs.promises.rm(cachedTrack.localPath, { force: true });
                 removedCount += 1;
@@ -2854,6 +3105,17 @@ app.whenReady().then(() => {
                 localPath: desiredPath,
                 updatedAt: new Date().toISOString(),
             };
+
+            upsertDownloadCacheEntry({
+                sourceUrl: downloadedPath ? null : previous?.sourceUrl || null,
+                spotifyUrl,
+                spotifyId: track.spotifyId || null,
+                name: track.name,
+                artist: track.artist,
+                durationMs: Number.isFinite(track.durationMs) ? track.durationMs : null,
+                localPath: desiredPath,
+                playlistPath: effectivePlaylistPath,
+            });
         }
 
         await applySafeRenameOperations(renameOperations);
@@ -2871,6 +3133,7 @@ app.whenReady().then(() => {
         };
         syncedEntry.tracks = nextTracks;
         savePlaylistSyncCache();
+        saveDownloadCache();
 
         return {
             success: true,

@@ -28,6 +28,7 @@ window.addEventListener('DOMContentLoaded', () => {
     const linksInput = document.getElementById('links-input');
     const consoleOutput = document.getElementById('console-output');
     const cancelBtn = document.getElementById('cancel-btn');
+    const queueDownloadBtn = document.getElementById('queue-download-btn');
     const bigCancelBtn = document.getElementById('big-cancel-btn');
     const loadingOverlay = document.getElementById('loading-overlay');
     const dropZone = document.getElementById('drop-zone');
@@ -183,6 +184,8 @@ window.addEventListener('DOMContentLoaded', () => {
         lastSilenceTrimProgressTick: 0,
         visualThemeSync: false,
         spectrogramColor: '#3b82f6',
+        isDownloadActive: false,
+        queuedDownloads: [],
     };
 
     // --- Helper Functions ---
@@ -455,6 +458,7 @@ window.addEventListener('DOMContentLoaded', () => {
             linksInput,
             consoleOutput,
             cancelBtn,
+            queueDownloadBtn,
             bigCancelBtn,
             loadingOverlay,
             dropZone,
@@ -1371,15 +1375,70 @@ window.addEventListener('DOMContentLoaded', () => {
         consoleOutput.scrollTop = consoleOutput.scrollHeight;
     }
 
+    const getLinksFromInput = () => linksInput.value
+        .split('\n')
+        .map(link => link.trim())
+        .filter(link => link.length > 0);
+
+    const setDownloadUiState = ({ active }) => {
+        state.isDownloadActive = Boolean(active);
+        if (state.isDownloadActive) {
+            downloadBtn.classList.add('hidden');
+            cancelBtn.classList.remove('hidden');
+            queueDownloadBtn.classList.remove('hidden');
+            bigCancelBtn.classList.remove('hidden');
+            linksInput.disabled = false;
+            return;
+        }
+
+        downloadBtn.classList.remove('hidden');
+        cancelBtn.classList.add('hidden');
+        queueDownloadBtn.classList.add('hidden');
+        bigCancelBtn.classList.add('hidden');
+        linksInput.disabled = false;
+    };
+
+    const beginDownloadBatch = (links, { clearConsole = false } = {}) => {
+        const normalizedLinks = Array.isArray(links)
+            ? links.map(link => (typeof link === 'string' ? link.trim() : '')).filter(Boolean)
+            : [];
+        if (normalizedLinks.length === 0) {
+            appendConsoleMessage('Please enter at least one link.');
+            return;
+        }
+
+        showView(consoleView, consoleBtn);
+        if (clearConsole) {
+            consoleOutput.innerHTML = '';
+        }
+        createPlaylistBtn.classList.add('hidden');
+        downloadProgressContainer.classList.remove('hidden');
+        downloadProgressBar.style.width = '0%';
+        downloadEta.textContent = 'Estimated time remaining: calculating...';
+        setDownloadUiState({ active: true });
+        window.electronAPI.startDownload(normalizedLinks);
+    };
+
+    const queueNextDownloadBatch = (links) => {
+        const normalizedLinks = Array.isArray(links)
+            ? links.map(link => (typeof link === 'string' ? link.trim() : '')).filter(Boolean)
+            : [];
+        if (normalizedLinks.length === 0) {
+            appendConsoleMessage('Please enter at least one link.');
+            return;
+        }
+
+        state.queuedDownloads.push(normalizedLinks);
+        appendConsoleMessage(`Queued ${normalizedLinks.length} link(s). Waiting for the current download to finish...`);
+        showNotification('info', 'Download Queued', `${normalizedLinks.length} link(s) queued.`);
+    };
+
     window.electronAPI.onUpdateStatus((message, isFinished, payload) => {
         logTab('Console', 'download update status event', { isFinished, hasPayload: Boolean(payload) });
         appendConsoleMessage(message);
         if (isFinished) {
-            downloadBtn.classList.remove('hidden');
-            linksInput.disabled = false;
-            cancelBtn.classList.add('hidden');
-            bigCancelBtn.classList.add('hidden');
-            downloadProgressContainer.classList.add('hidden');
+            const hasQueuedBatch = state.queuedDownloads.length > 0;
+
             if (payload && payload.success && payload.filesDownloaded > 0) {
                 if (autoCreatePlaylistInput.checked) {
                     appendConsoleMessage('Automatically creating playlist...');
@@ -1388,6 +1447,17 @@ window.addEventListener('DOMContentLoaded', () => {
                     createPlaylistBtn.classList.remove('hidden');
                 }
             }
+
+            if (hasQueuedBatch) {
+                const nextBatch = state.queuedDownloads.shift();
+                appendConsoleMessage(`Starting queued download with ${nextBatch.length} link(s)...`);
+                beginDownloadBatch(nextBatch, { clearConsole: false });
+                return;
+            }
+
+            state.queuedDownloads = [];
+            setDownloadUiState({ active: false });
+            downloadProgressContainer.classList.add('hidden');
         }
     });
 
@@ -1408,30 +1478,35 @@ window.addEventListener('DOMContentLoaded', () => {
 
     // --- Download Logic ---
     downloadBtn.addEventListener('click', () => {
-        const links = linksInput.value.split('\n').filter(link => link.trim() !== '');
-        log('Download requested', { linkCount: links.length });
-        if (links.length === 0) {
-            appendConsoleMessage('Please enter at least one link.');
+        const links = getLinksFromInput();
+        log('Download requested', { linkCount: links.length, activeDownload: state.isDownloadActive });
+        if (state.isDownloadActive) {
+            queueNextDownloadBatch(links);
             return;
         }
-        showView(consoleView, consoleBtn);
-        downloadBtn.classList.add('hidden');
-        linksInput.disabled = true;
-        cancelBtn.classList.remove('hidden');
-        bigCancelBtn.classList.remove('hidden');
-        createPlaylistBtn.classList.add('hidden');
-        consoleOutput.innerHTML = '';
-        downloadProgressContainer.classList.remove('hidden');
-        downloadProgressBar.style.width = '0%';
-        downloadEta.textContent = 'Estimated time remaining: calculating...';
-        window.electronAPI.startDownload(links);
+
+        beginDownloadBatch(links, { clearConsole: true });
+    });
+    queueDownloadBtn.addEventListener('click', () => {
+        const links = getLinksFromInput();
+        log('Queue download requested from secondary download button', { linkCount: links.length, activeDownload: state.isDownloadActive });
+        if (state.isDownloadActive) {
+            queueNextDownloadBatch(links);
+            return;
+        }
+
+        beginDownloadBatch(links, { clearConsole: true });
     });
     cancelBtn.addEventListener('click', () => {
         log('Download cancel requested from small cancel button');
+        state.queuedDownloads = [];
+        setDownloadUiState({ active: false });
         window.electronAPI.cancelDownload();
     });
     bigCancelBtn.addEventListener('click', () => {
         log('Download cancel requested from console cancel button');
+        state.queuedDownloads = [];
+        setDownloadUiState({ active: false });
         window.electronAPI.cancelDownload();
     });
     createPlaylistBtn.addEventListener('click', async () => {
@@ -1613,18 +1688,23 @@ window.addEventListener('DOMContentLoaded', () => {
     window.electronAPI.onUpdateAvailable(() => {
         log('Update available event received');
         updateNotification.classList.remove('hidden');
+        updateNotification.dataset.state = 'downloading';
+        restartBtn.classList.add('hidden');
         updateMessage.textContent = 'A new update is available. Downloading now...';
         showNotification('info', 'Update Found', 'Downloading new version...');
     });
     window.electronAPI.onUpdateDownloadProgress((progressObj) => {
         log('Update download progress', { percent: progressObj?.percent });
         updateNotification.classList.remove('hidden');
+        updateNotification.dataset.state = 'downloading';
+        restartBtn.classList.add('hidden');
         const progress = progressObj.percent.toFixed(1);
         updateMessage.textContent = `Downloading update... ${progress}%`;
     });
     window.electronAPI.onUpdateDownloaded(() => {
         log('Update downloaded and ready to install');
         updateNotification.classList.remove('hidden');
+        updateNotification.dataset.state = 'ready';
         updateMessage.textContent = 'Update downloaded. Click the button to install on restart.';
         restartBtn.classList.remove('hidden');
         showNotification('success', 'Update Ready', 'Click the restart button or the system notification to install.');
