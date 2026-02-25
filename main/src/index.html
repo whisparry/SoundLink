@@ -149,14 +149,16 @@
             <div id="settings-view" class="view">
                 <h1>Settings</h1>
                 <div class="settings-tab-bar" id="settings-tab-bar">
-                    <button class="settings-tab-btn active" data-settings-tab="general" type="button">General</button>
+                    <button class="settings-tab-btn active" data-settings-tab="download" type="button">Download</button>
                     <button class="settings-tab-btn" data-settings-tab="themes" type="button">Themes</button>
                     <button class="settings-tab-btn" data-settings-tab="playback" type="button">Playback</button>
+                    <button class="settings-tab-btn" data-settings-tab="interface" type="button">Interface</button>
                     <button class="settings-tab-btn" data-settings-tab="library" type="button">Library</button>
+                    <button class="settings-tab-btn" data-settings-tab="automation" type="button">Automation</button>
                     <button class="settings-tab-btn" data-settings-tab="maintenance" type="button">Maintenance</button>
                 </div>
 
-                <div class="settings-tab-panel" id="settings-panel-general">
+                <div class="settings-tab-panel" id="settings-panel-download">
                     <div class="settings-group">
                         <label for="clientId">Spotify Client ID</label>
                         <p class="setting-note">Used to authenticate Spotify API requests from the app.</p>
@@ -195,15 +197,27 @@
                         <p class="setting-note">Maximum results returned per Spotify search request.</p>
                         <input type="number" id="spotify-search-limit" placeholder="1-50" min="1" max="50">
                     </div>
-                    <div class="settings-group toggle-switch-container">
-                        <div class="setting-label-block">
-                            <label for="autoCreatePlaylist">Automatically Create Playlist</label>
-                            <p class="setting-note">Creates a playlist from the most recent successful download batch.</p>
-                        </div>
-                        <label class="toggle-switch">
-                            <input type="checkbox" id="autoCreatePlaylist">
-                            <span class="slider round"></span>
-                        </label>
+                    <div class="settings-group">
+                        <label for="fileExtension">Audio File Extension</label>
+                        <p class="setting-note">Output format used when extracting audio from downloads.</p>
+                        <select id="fileExtension">
+                            <option value="m4a">m4a (best quality)</option>
+                            <option value="mp3">mp3</option>
+                            <option value="wav">wav</option>
+                            <option value="flac">flac</option>
+                            <option value="ogg">ogg</option>
+                            <option value="webm">webm</option>
+                        </select>
+                    </div>
+                    <div class="settings-group">
+                        <label for="downloadThreads">Download Threads</label>
+                        <p class="setting-note">How many downloads can run in parallel.</p>
+                        <input type="number" id="downloadThreads" placeholder="1-20" min="1">
+                    </div>
+                    <div class="settings-group">
+                        <label for="durationToleranceSeconds">Duration Tolerance (seconds)</label>
+                        <p class="setting-note">Allowed duration difference when matching search results.</p>
+                        <input type="number" id="durationToleranceSeconds" placeholder="0-120" min="0" max="120">
                     </div>
                 </div>
 
@@ -227,23 +241,6 @@
                 </div>
 
                 <div class="settings-tab-panel hidden" id="settings-panel-playback">
-                    <div class="settings-group">
-                        <label for="fileExtension">Audio File Extension</label>
-                        <p class="setting-note">Output format used when extracting audio from downloads.</p>
-                        <select id="fileExtension">
-                            <option value="m4a">m4a (best quality)</option>
-                            <option value="mp3">mp3</option>
-                            <option value="wav">wav</option>
-                            <option value="flac">flac</option>
-                            <option value="ogg">ogg</option>
-                            <option value="webm">webm</option>
-                        </select>
-                    </div>
-                    <div class="settings-group">
-                        <label for="downloadThreads">Download Threads</label>
-                        <p class="setting-note">How many downloads can run in parallel.</p>
-                        <input type="number" id="downloadThreads" placeholder="1-20" min="1">
-                    </div>
                     <div class="settings-group toggle-switch-container">
                         <div class="setting-label-block">
                             <label for="normalizeVolume">Normalize Volume (slower)</label>
@@ -269,15 +266,17 @@
                             <label>Sleep Timer</label>
                             <p class="setting-note">Stops playback automatically after a selected duration.</p>
                         </div>
-                        <button id="sleep-timer-btn" type="button" class="secondary-btn settings-sleep-timer-btn" title="Sleep Timer">
-                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
-                            <span>Set Sleep Timer</span>
-                        </button>
-                        <span id="sleep-timer-display" class="hidden settings-sleep-timer-display"></span>
+                        <div class="sleep-timer-controls">
+                            <button id="sleep-timer-btn" type="button" class="secondary-btn settings-sleep-timer-btn" title="Sleep Timer">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+                                <span>Set Sleep Timer</span>
+                            </button>
+                            <span id="sleep-timer-display" class="hidden settings-sleep-timer-display"></span>
+                        </div>
                     </div>
                 </div>
 
-                <div class="settings-tab-panel hidden" id="settings-panel-library">
+                <div class="settings-tab-panel hidden" id="settings-panel-interface">
                     <div class="settings-group toggle-switch-container">
                         <div class="setting-label-block">
                             <label for="hideRefreshButtons">Hide Refresh Buttons</label>
@@ -330,6 +329,19 @@
                     </div>
                     <div class="settings-group toggle-switch-container">
                         <div class="setting-label-block">
+                            <label for="disableToasts">Disable Toast Popups</label>
+                            <p class="setting-note">Turns off toast popups while still saving entries in Notification History.</p>
+                        </div>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="disableToasts">
+                            <span class="slider round"></span>
+                        </label>
+                    </div>
+                </div>
+
+                <div class="settings-tab-panel hidden" id="settings-panel-library">
+                    <div class="settings-group toggle-switch-container">
+                        <div class="setting-label-block">
                             <label for="enableSmartPlaylists">Enable Smart Playlists</label>
                             <p class="setting-note">Shows dynamic playlists like Recently Added and Most Played.</p>
                         </div>
@@ -348,6 +360,19 @@
                             <span class="slider round"></span>
                         </label>
                     </div>
+                </div>
+
+                <div class="settings-tab-panel hidden" id="settings-panel-automation">
+                    <div class="settings-group toggle-switch-container">
+                        <div class="setting-label-block">
+                            <label for="autoCreatePlaylist">Automatically Create Playlist</label>
+                            <p class="setting-note">Creates a playlist from the most recent successful download batch.</p>
+                        </div>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="autoCreatePlaylist">
+                            <span class="slider round"></span>
+                        </label>
+                    </div>
                     <div class="settings-group toggle-switch-container">
                         <div class="setting-label-block">
                             <label for="skipManualLinkPrompt">Skip Manual Link Prompt</label>
@@ -358,29 +383,14 @@
                             <span class="slider round"></span>
                         </label>
                     </div>
-                    <div class="settings-group toggle-switch-container">
-                        <div class="setting-label-block">
-                            <label for="disableToasts">Disable Toast Popups</label>
-                            <p class="setting-note">Turns off toast popups while still saving entries in Notification History.</p>
-                        </div>
-                        <label class="toggle-switch">
-                            <input type="checkbox" id="disableToasts">
-                            <span class="slider round"></span>
-                        </label>
-                    </div>
-                    <div class="settings-group">
-                        <label for="durationToleranceSeconds">Duration Tolerance (seconds)</label>
-                        <p class="setting-note">Allowed duration difference when matching search results.</p>
-                        <input type="number" id="durationToleranceSeconds" placeholder="0-120" min="0" max="120">
-                    </div>
+                </div>
+
+                <div class="settings-tab-panel hidden" id="settings-panel-maintenance">
                     <div class="settings-group">
                         <label for="silenceTrimThresholdDb">Silence Trim Threshold (dB)</label>
                         <p class="setting-note">Lower values trim less silence; higher values trim more aggressively.</p>
                         <input type="number" id="silenceTrimThresholdDb" placeholder="10-80" min="10" max="80">
                     </div>
-                </div>
-
-                <div class="settings-tab-panel hidden" id="settings-panel-maintenance">
                     <div class="settings-group advanced-actions-container">
                         <div class="maintenance-action">
                             <button id="trim-library-silence-btn" class="secondary-btn">Trim Start/End Silence in Library</button>

@@ -161,7 +161,7 @@ window.addEventListener('DOMContentLoaded', () => {
     // --- STATE & CONTEXT (Centralized) ---
     const state = {
         currentThemeName: 'dark',
-        currentSettingsTab: 'general',
+        currentSettingsTab: 'download',
         favoriteThemes: [],
         favoritePlaylists: [],
         playlists: [],
@@ -254,7 +254,7 @@ window.addEventListener('DOMContentLoaded', () => {
 
     function setSettingsTab(tabName) {
         if (!settingsTabButtons.length || !settingsTabPanels.length) return;
-        const normalizedTabName = tabName || 'general';
+        const normalizedTabName = tabName || 'download';
         state.currentSettingsTab = normalizedTabName;
         settingsTabButtons.forEach(button => {
             const isActive = button.dataset.settingsTab === normalizedTabName;

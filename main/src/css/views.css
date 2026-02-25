@@ -429,28 +429,33 @@ input[type=number] {
 
 .sleep-timer-settings-group {
     display: flex;
-    align-items: center;
-    gap: 10px;
-    flex-wrap: wrap;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
 }
 
 .sleep-timer-settings-group label {
     margin-bottom: 0;
-    min-width: 100%;
 }
 
 .sleep-timer-settings-group .setting-note {
     margin: 0;
 }
 
+.sleep-timer-controls {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
 .settings-sleep-timer-btn {
-    margin-top: 0;
+    margin-top: 2px;
     display: inline-flex;
     align-items: center;
     gap: 8px;
     width: fit-content;
     flex: 0 0 auto;
-    align-self: flex-start;
 }
 
 .settings-sleep-timer-btn.active {
