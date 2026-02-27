@@ -83,6 +83,7 @@ let ytdlpInstanceIndex = 0;
 let lastDownloadedFiles = [];
 let lastPlaylistName = null;
 let isDownloadCancelled = false;
+const activeDownloadArtifacts = new Map();
 let lastDownloadedTrackContexts = {};
 let cachedYtdlpPluginPath = undefined;
 let hasLoggedMissingYtdlpPlugin = false;
@@ -104,6 +105,7 @@ let trayPlaybackState = {
 const SMART_PLAYLIST_RECENTLY_ADDED = '__smart__/recently-added';
 const SMART_PLAYLIST_MOST_PLAYED = '__smart__/most-played';
 const MAX_DOWNLOAD_THREADS = 10;
+const IS_WINDOWS = process.platform === 'win32';
 
 const DEFAULT_DOWNLOAD_TIMING_STATS = {
     trackSamples: 0,
@@ -172,16 +174,53 @@ function formatEta(ms) {
     return 'less than a second remaining';
 }
 
+function isYtdlpExecutableName(fileName) {
+    if (typeof fileName !== 'string') return false;
+    const normalizedName = fileName.trim().toLowerCase();
+    if (!normalizedName.startsWith('yt-dlp')) return false;
+    if (normalizedName.endsWith('.old')) return false;
+
+    if (IS_WINDOWS) {
+        return normalizedName.endsWith('.exe');
+    }
+
+    return !normalizedName.includes('.');
+}
+
+function listYtdlpExecutableCandidates() {
+    if (!fs.existsSync(ytdlpDir)) return [];
+    return fs.readdirSync(ytdlpDir)
+        .filter(isYtdlpExecutableName)
+        .map(file => path.join(ytdlpDir, file));
+}
+
+function resolveCommandOnPath(commandName) {
+    try {
+        const resolver = IS_WINDOWS ? 'where.exe' : 'which';
+        const output = execFileSync(resolver, [commandName], {
+            encoding: 'utf8',
+            windowsHide: true,
+            maxBuffer: 1024 * 1024,
+        });
+
+        const resolved = output
+            .split(/\r?\n/)
+            .map(line => line.trim())
+            .find(Boolean);
+
+        return resolved || null;
+    } catch {
+        return null;
+    }
+}
+
 function findYtdlpExecutables() {
     try {
-        if (!fs.existsSync(ytdlpDir)) {
-            console.error(`yt-dlp directory not found at: ${ytdlpDir}`);
-            return;
-        }
-        const files = fs.readdirSync(ytdlpDir);
-        const candidates = files
-            .filter(file => file.startsWith('yt-dlp') && file.endsWith('.exe'))
-            .map(file => path.join(ytdlpDir, file));
+        const bundledCandidates = listYtdlpExecutableCandidates();
+        const pathCandidate = resolveCommandOnPath('yt-dlp');
+        const candidates = bundledCandidates.length > 0
+            ? bundledCandidates
+            : (pathCandidate ? [pathCandidate] : []);
 
         const withVersion = candidates.map(filePath => {
             let versionDate = null;
@@ -242,7 +281,19 @@ function findYtdlpExecutables() {
                 const threadPluginPath = path.join(threadRootPath, 'plugins');
 
                 fs.mkdirSync(threadRootPath, { recursive: true });
-                fs.copyFileSync(sourceExecutablePath, threadExecutablePath);
+                const useBundledExecutable = fs.existsSync(sourceExecutablePath);
+                const runtimeExecutablePath = useBundledExecutable ? threadExecutablePath : sourceExecutablePath;
+
+                if (useBundledExecutable) {
+                    fs.copyFileSync(sourceExecutablePath, threadExecutablePath);
+                    if (!IS_WINDOWS) {
+                        try {
+                            fs.chmodSync(threadExecutablePath, 0o755);
+                        } catch {
+                            // Ignore chmod failures; process spawn will surface real executable issues.
+                        }
+                    }
+                }
 
                 let resolvedPluginPath = null;
                 if (pluginSourcePath && fs.existsSync(pluginSourcePath)) {
@@ -256,7 +307,7 @@ function findYtdlpExecutables() {
                     threadIndex: index + 1,
                     threadName,
                     rootPath: threadRootPath,
-                    executablePath: threadExecutablePath,
+                    executablePath: runtimeExecutablePath,
                     pluginPath: resolvedPluginPath,
                     sourceExecutablePath,
                 });
@@ -264,7 +315,7 @@ function findYtdlpExecutables() {
         }
 
         if (ytdlpThreadInstances.length === 0) {
-            console.error(`No 'yt-dlp*.exe' executables found in ${ytdlpDir}`);
+            console.error(`No usable yt-dlp executable found in bundled resources (${ytdlpDir}) or system PATH.`);
         } else {
             const selected = ytdlpThreadInstances[0];
             const pluginEnabledCount = ytdlpThreadInstances.filter(instance => instance.pluginPath).length;
@@ -1647,11 +1698,13 @@ app.whenReady().then(() => {
     });
 
     ipcMain.handle('update-ytdlp', async () => {
-        const candidates = fs.existsSync(ytdlpDir)
-            ? fs.readdirSync(ytdlpDir)
-                .filter(file => file.startsWith('yt-dlp') && file.endsWith('.exe'))
-                .map(file => path.join(ytdlpDir, file))
-            : [];
+        const candidates = listYtdlpExecutableCandidates();
+        if (candidates.length === 0) {
+            const pathCandidate = resolveCommandOnPath('yt-dlp');
+            if (pathCandidate) {
+                candidates.push(pathCandidate);
+            }
+        }
 
         if (candidates.length === 0) {
             return 'Error: yt-dlp executable not found.';
@@ -2906,10 +2959,70 @@ app.whenReady().then(() => {
 
     ipcMain.on('cancel-download', () => {
         isDownloadCancelled = true;
+
+        const cleanupDownloadedPath = (filePath, deletedPathSet) => {
+            const normalizedPath = normalizePathKey(filePath);
+            if (!normalizedPath || deletedPathSet.has(normalizedPath)) return;
+
+            try {
+                if (fs.existsSync(filePath)) {
+                    fs.unlinkSync(filePath);
+                }
+                removeDownloadCacheEntry(filePath);
+                deletedPathSet.add(normalizedPath);
+            } catch (error) {
+                console.error('Failed to delete canceled download file:', filePath, error);
+            }
+        };
+
+        const cleanupPartialArtifacts = (artifact, deletedPathSet) => {
+            if (!artifact || typeof artifact !== 'object') return;
+
+            const { outputDir, filePrefix, finalPath } = artifact;
+            cleanupDownloadedPath(finalPath, deletedPathSet);
+
+            if (!outputDir || !filePrefix || !fs.existsSync(outputDir)) return;
+
+            const lowerPrefix = String(filePrefix).toLowerCase();
+            const isTempArtifact = (name) => {
+                const loweredName = name.toLowerCase();
+                if (!loweredName.startsWith(lowerPrefix)) return false;
+                return loweredName.endsWith('.part')
+                    || loweredName.includes('.part-frag')
+                    || loweredName.endsWith('.tmp')
+                    || loweredName.endsWith('.temp')
+                    || loweredName.endsWith('.ytdl');
+            };
+
+            try {
+                const candidates = fs.readdirSync(outputDir);
+                for (const fileName of candidates) {
+                    if (!isTempArtifact(fileName)) continue;
+                    const filePath = path.join(outputDir, fileName);
+                    cleanupDownloadedPath(filePath, deletedPathSet);
+                }
+            } catch (error) {
+                console.error('Failed to clean partial artifacts for canceled download:', artifact, error);
+            }
+        };
+
         for (const proc of activeProcesses) {
             try { proc.kill('SIGTERM'); } catch (err) { console.error('Failed to kill process:', err); }
         }
         activeProcesses.clear();
+
+        const deletedPathSet = new Set();
+        for (const artifact of activeDownloadArtifacts.values()) {
+            cleanupPartialArtifacts(artifact, deletedPathSet);
+        }
+        activeDownloadArtifacts.clear();
+
+        for (const downloadedPath of lastDownloadedFiles) {
+            cleanupDownloadedPath(downloadedPath, deletedPathSet);
+        }
+        lastDownloadedFiles = [];
+        lastDownloadedTrackContexts = {};
+
         if (mainWindow) mainWindow.webContents.send('update-status', 'Download cancelled by user.', true, { success: false });
         saveStats();
     });
@@ -3522,6 +3635,11 @@ app.whenReady().then(() => {
             const proc = spawn(ytdlpInstance.executablePath, [...getYtdlpCommonArgs(ytdlpInstance), ...args], { cwd: ytdlpInstance.rootPath });
             activeProcesses.add(proc);
             let finalPath = '';
+            activeDownloadArtifacts.set(proc, {
+                outputDir: safeOutputDir,
+                filePrefix: `${numberPrefix} - ${sanitizedTrackName}.`,
+                finalPath: '',
+            });
             let stdoutBuffer = '';
             let stderrBuffer = '';
 
@@ -3555,6 +3673,10 @@ app.whenReady().then(() => {
                 const parsedDestination = parseDestinationFromLine(cleanLine);
                 if (parsedDestination) {
                     finalPath = parsedDestination.trim().replace(/^"|"$/g, '');
+                    const existingArtifact = activeDownloadArtifacts.get(proc);
+                    if (existingArtifact) {
+                        existingArtifact.finalPath = finalPath;
+                    }
                 }
             };
 
@@ -3598,6 +3720,7 @@ app.whenReady().then(() => {
             });
             proc.on('close', async (code) => {
                 activeProcesses.delete(proc);
+                activeDownloadArtifacts.delete(proc);
                 if (isDownloadCancelled) return reject(new Error('Download cancelled'));
 
                 if (stdoutBuffer) {
@@ -3622,6 +3745,7 @@ app.whenReady().then(() => {
             });
             proc.on('error', (err) => {
                 activeProcesses.delete(proc);
+                activeDownloadArtifacts.delete(proc);
                 reject(err);
             });
         });
@@ -3705,7 +3829,7 @@ async function ensureUndoTrashExists() {
 }
 
 function getMediaToolPath(toolName) {
-    const executableName = process.platform === 'win32' ? `${toolName}.exe` : toolName;
+    const executableName = IS_WINDOWS ? `${toolName}.exe` : toolName;
     const bundledPath = path.join(ytdlpDir, executableName);
     if (fs.existsSync(bundledPath)) {
         return bundledPath;
