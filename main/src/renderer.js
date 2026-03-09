@@ -191,7 +191,6 @@ window.addEventListener('DOMContentLoaded', () => {
         isDownloadActive: false,
         queuedDownloads: [],
         consoleQueueModel: null,
-        completedQueueItemTimers: new Map(),
     };
 
     // --- Helper Functions ---
@@ -1495,68 +1494,7 @@ window.addEventListener('DOMContentLoaded', () => {
         }, 0);
     };
 
-    const clearCompletedQueueItemTimers = () => {
-        if (!(state.completedQueueItemTimers instanceof Map)) {
-            state.completedQueueItemTimers = new Map();
-            return;
-        }
-
-        for (const timeoutId of state.completedQueueItemTimers.values()) {
-            window.clearTimeout(timeoutId);
-        }
-        state.completedQueueItemTimers.clear();
-    };
-
-    const removeQueueItemOrTrack = ({ queuePosition, trackKey = null }) => {
-        if (!state.consoleQueueModel) return;
-
-        const model = state.consoleQueueModel;
-        const item = model.itemsByQueuePosition.get(queuePosition);
-        if (!item) return;
-
-        if (item.kind === 'playlist' && trackKey !== null) {
-            const normalizedTrackKey = String(trackKey);
-            const hadTrack = item.tracksByKey?.has(normalizedTrackKey);
-            if (!hadTrack) return;
-
-            item.tracksByKey.delete(normalizedTrackKey);
-            item.tracks = item.tracks.filter(track => String(track.key) !== normalizedTrackKey);
-
-            if (item.tracks.length === 0) {
-                model.itemsByQueuePosition.delete(queuePosition);
-                model.items = model.items.filter(entry => entry.queuePosition !== queuePosition);
-            } else {
-                item.durationMs = item.tracks.reduce((sum, track) => sum + (Number.isFinite(track.durationMs) ? track.durationMs : 0), 0);
-                item.progress = clampPercent((item.tracks.reduce((sum, track) => sum + clampPercent(track.progress), 0)) / item.tracks.length);
-            }
-        } else {
-            model.itemsByQueuePosition.delete(queuePosition);
-            model.items = model.items.filter(entry => entry.queuePosition !== queuePosition);
-        }
-
-        renderConsoleQueueModel();
-    };
-
-    const scheduleCompletedQueueItemClear = ({ queuePosition, trackKey = null }) => {
-        if (!Number.isFinite(queuePosition) || queuePosition <= 0) return;
-        const timerKey = trackKey !== null
-            ? `${queuePosition}:track:${String(trackKey)}`
-            : `${queuePosition}:item`;
-
-        if (!(state.completedQueueItemTimers instanceof Map)) {
-            state.completedQueueItemTimers = new Map();
-        }
-        if (state.completedQueueItemTimers.has(timerKey)) return;
-
-        const timeoutId = window.setTimeout(() => {
-            state.completedQueueItemTimers.delete(timerKey);
-            removeQueueItemOrTrack({ queuePosition, trackKey });
-        }, 5000);
-
-        state.completedQueueItemTimers.set(timerKey, timeoutId);
-    };
-
-    const renderProgressRow = ({ progress = 0, isFinished = false }) => {
+    const renderProgressRow = ({ progress = 0 }) => {
         const row = document.createElement('div');
         row.className = 'console-progress-row';
 
@@ -1569,7 +1507,7 @@ window.addEventListener('DOMContentLoaded', () => {
 
         const label = document.createElement('span');
         label.className = 'console-progress-label';
-        label.textContent = isFinished ? 'Finished' : `${Math.round(clampPercent(progress))}%`;
+        label.textContent = `${Math.round(clampPercent(progress))}%`;
 
         row.appendChild(track);
         row.appendChild(label);
@@ -1598,8 +1536,7 @@ window.addEventListener('DOMContentLoaded', () => {
         meta.appendChild(duration);
         trackCard.appendChild(meta);
 
-        const trackProgress = clampPercent(track.progress || 0);
-        trackCard.appendChild(renderProgressRow({ progress: trackProgress, isFinished: trackProgress >= 100 }));
+        trackCard.appendChild(renderProgressRow({ progress: track.progress || 0 }));
         return trackCard;
     };
 
@@ -1614,9 +1551,8 @@ window.addEventListener('DOMContentLoaded', () => {
         if (queueTrackCount) queueTrackCount.textContent = `Tracks: ${totalTracks}`;
         if (queuePlaylistCount) queuePlaylistCount.textContent = `Playlists: ${playlistCount}`;
         if (queueDurationTotal) queueDurationTotal.textContent = `Duration: ${formatDurationFromMs(totalDurationMs)}`;
-        const normalizedQueueProgress = clampPercent(model.progress);
-        if (queueProgressBar) queueProgressBar.style.width = `${normalizedQueueProgress}%`;
-        if (queueProgressLabel) queueProgressLabel.textContent = normalizedQueueProgress >= 100 ? 'Finished' : `${Math.round(normalizedQueueProgress)}%`;
+        if (queueProgressBar) queueProgressBar.style.width = `${clampPercent(model.progress)}%`;
+        if (queueProgressLabel) queueProgressLabel.textContent = `${Math.round(clampPercent(model.progress))}%`;
         if (!queuePlaylistsContainer) return;
 
         queuePlaylistsContainer.innerHTML = '';
@@ -1661,8 +1597,7 @@ window.addEventListener('DOMContentLoaded', () => {
                     meta.appendChild(duration);
                     playlistCard.appendChild(meta);
 
-                    const playlistProgress = clampPercent(item.progress || 0);
-                    playlistCard.appendChild(renderProgressRow({ progress: playlistProgress, isFinished: playlistProgress >= 100 }));
+                    playlistCard.appendChild(renderProgressRow({ progress: item.progress || 0 }));
 
                     const tracksContainer = document.createElement('div');
                     tracksContainer.className = 'playlist-tracks-container';
@@ -1787,10 +1722,6 @@ window.addEventListener('DOMContentLoaded', () => {
                     track.durationMs = payload.trackDurationMs;
                 }
                 track.progress = trackProgress;
-
-                if (trackProgress >= 100) {
-                    scheduleCompletedQueueItemClear({ queuePosition, trackKey });
-                }
             }
 
             item.durationMs = item.tracks.reduce((sum, track) => sum + (Number.isFinite(track.durationMs) ? track.durationMs : 0), 0);
@@ -1799,10 +1730,6 @@ window.addEventListener('DOMContentLoaded', () => {
             if (typeof payload.trackArtist === 'string') item.artist = payload.trackArtist;
             if (Number.isFinite(payload.trackDurationMs) && payload.trackDurationMs > 0) item.durationMs = payload.trackDurationMs;
             item.progress = trackProgress;
-
-            if (trackProgress >= 100) {
-                scheduleCompletedQueueItemClear({ queuePosition });
-            }
         }
 
         renderConsoleQueueModel();
@@ -1844,7 +1771,6 @@ window.addEventListener('DOMContentLoaded', () => {
         if (clearConsole) {
             consoleOutput.innerHTML = '';
         }
-        clearCompletedQueueItemTimers();
         initializeConsoleQueueFromLinks(normalizedLinks);
         createPlaylistBtn.classList.add('hidden');
         setDownloadUiState({ active: true });
@@ -1938,7 +1864,6 @@ window.addEventListener('DOMContentLoaded', () => {
     cancelBtn.addEventListener('click', () => {
         log('Download cancel requested from small cancel button');
         state.queuedDownloads = [];
-        clearCompletedQueueItemTimers();
         setDownloadUiState({ active: false });
         if (state.consoleQueueModel) {
             state.consoleQueueModel.statusText = 'Cancelling download...';
@@ -1949,7 +1874,6 @@ window.addEventListener('DOMContentLoaded', () => {
     bigCancelBtn.addEventListener('click', () => {
         log('Download cancel requested from console cancel button');
         state.queuedDownloads = [];
-        clearCompletedQueueItemTimers();
         setDownloadUiState({ active: false });
         if (state.consoleQueueModel) {
             state.consoleQueueModel.statusText = 'Cancelling download...';
