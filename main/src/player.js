@@ -1516,9 +1516,8 @@ async function renderActiveTracks(options = {}) {
                 updateNowPlaying();
                 highlightCurrentTrack();
                 if (wasPlaying) {
-                    if (audio.src !== currentTracklist[preservedIndex].path) {
-                        audio.src = currentTracklist[preservedIndex].path;
-                    }
+                    // audio.src is already set to this track (it was playing before the rebuild);
+                    // don't reassign it — reassigning restarts playback from the beginning.
                     play();
                 }
                 return;
