@@ -2231,10 +2231,10 @@ app.whenReady().then(() => {
             return [];
         }
         try {
-            await refreshSpotifyToken();
             const searchLimit = limit && limit >= 1 && limit <= 50 ? limit : 10;
-    
-            const searchFunctions = {
+
+            const runSpotifySearch = async () => {
+                const searchFunctions = {
                 playlist: async () => {
                     const data = await spotifyApi.searchPlaylists(query, { limit: searchLimit });
                     return data.body.playlists.items
@@ -2282,20 +2282,41 @@ app.whenReady().then(() => {
     
                     return [...playlistResults, ...trackResults, ...albumResults];
                 }
-            };
-    
-            if (searchFunctions[type]) {
-                return await searchFunctions[type]();
-            } else {
+                };
+
+                if (searchFunctions[type]) {
+                    return await searchFunctions[type]();
+                }
+
                 return await searchFunctions.playlist();
+            };
+
+            await refreshSpotifyToken();
+
+            try {
+                return await runSpotifySearch();
+            } catch (searchError) {
+                const statusCode = searchError?.statusCode || searchError?.status;
+                if (statusCode === 401 || statusCode === 403) {
+                    await refreshSpotifyToken();
+                    return await runSpotifySearch();
+                }
+                throw searchError;
             }
     
         } catch (error) {
             console.error('Spotify search failed:', error);
             let errorMessage = 'Could not perform search.';
-            if (error.body && error.body.error) {
-                errorMessage = `Spotify Error: ${error.body.error.message}`;
-            } else if (error.message.includes('token')) {
+            const statusCode = error?.statusCode || error?.status;
+            const spotifyErrorMessage = error?.body?.error?.message || error?.body?.error_description;
+
+            if (spotifyErrorMessage) {
+                errorMessage = `Spotify Error: ${spotifyErrorMessage}`;
+            } else if (statusCode === 401) {
+                errorMessage = 'Spotify authentication expired. Please re-check your Spotify credentials in Settings and try again.';
+            } else if (statusCode === 403) {
+                errorMessage = 'Spotify search is currently forbidden (HTTP 403). Check Spotify API app permissions/credentials and try again in a moment.';
+            } else if (error?.message?.toLowerCase().includes('token')) {
                 errorMessage = 'Spotify auth failed. Check credentials in Settings.';
             }
             return { error: errorMessage };
